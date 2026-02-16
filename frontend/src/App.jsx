@@ -90,21 +90,32 @@ function App() {
   const [rules, setRules] = useState([])
   const [ruleName, setRuleName] = useState("")
   const [editingId, setEditingId] = useState(null) // Track if we are editing
+  const [sources, setSources] = useState([])
+  const [selectedSourceId, setSelectedSourceId] = useState("")
   
   // HISTORY STATE
   const [history, setHistory] = useState([])
   const [modalData, setModalData] = useState(null) // For the popup
   
-  // OLD
-  // const API_URL = "http://localhost:8000"
+  // DATA HUB FORM STATE
+  const [newSourceName, setNewSourceName] = useState("")
+  const [newSourceUrl, setNewSourceUrl] = useState("")
+  const [newSourceType, setNewSourceType] = useState("") // Default to postgres
 
   // NEW
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
   useEffect(() => {
+    // Always fetch sources because we need them for the dropdown in Playground
+    fetchSources()
     if (activeTab === 'rules') fetchRules()
     if (activeTab === 'history') fetchHistory()
   }, [activeTab])
+
+  const fetchSources = async () => {
+    try { const res = await axios.get(`${API_URL}/sources/`); setSources(res.data) }
+    catch (err) { console.error(err) }
+  }
 
   const fetchRules = async () => {
     try { const res = await axios.get(`${API_URL}/rules/`); setRules(res.data) }
@@ -116,14 +127,26 @@ function App() {
     catch (err) { console.error(err) }
   }
 
+  const createSource = async () => {
+    try {
+      await axios.post(`${API_URL}/sources/`, { name: newSourceName, connection_url: newSourceUrl, type: newSourceType })
+      alert("Source Added!")
+      setNewSourceName(""); setNewSourceUrl(""); setNewSourceType("")
+      fetchSources()
+    } catch(err) { alert("Error adding source") }
+  }
+
   const runAdHoc = async () => {
     setResult(null)
+    if (!selectedSourceId) return alert("Please select a Data Source first!")
     try {
       let parsedParams = {}
-      try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON in Parameters") }
-
-      const res = await axios.post(`${API_URL}/run-adhoc`, { sql, params: parsedParams })
-      setResult(res.data.data) // Store just the array of rows
+      try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON Params") }
+      
+      const res = await axios.post(`${API_URL}/run-adhoc`, { 
+        sql, params: parsedParams, source_id: selectedSourceId 
+      })
+      setResult(res.data.data)
     } catch (err) {
       alert("Error: " + (err.response?.data?.detail || err.message))
     }
@@ -131,7 +154,7 @@ function App() {
 
   const saveOrUpdateRule = async () => {
     if(!ruleName) return alert("Please name your rule!")
-    
+    if(!selectedSourceId) return alert("Data Source is required!")
     try {
       // Parse params from the text box
       let parsedParams = {}
@@ -141,7 +164,8 @@ function App() {
       const payload = { 
         name: ruleName, 
         sql: sql,
-        params: parsedParams // <--- SENDING PARAMS NOW
+        params: parsedParams, // <--- SENDING PARAMS NOW
+        source_id: selectedSourceId // <--- SENDING SOURCE ID NOW
       }
       
       if (editingId) {
@@ -167,6 +191,7 @@ function App() {
     // Load params back into the text box
     // The backend now returns them in the 'params' field (dict), so we stringify it
     setParams(JSON.stringify(rule.params || {}, null, 2)) 
+    setSelectedSourceId(rule.source_id) // <--- Load saved source
     setEditingId(rule.id)
     setResult(null)
     setActiveTab('playground')
@@ -177,9 +202,7 @@ function App() {
       const res = await axios.post(`${API_URL}/run-rule/${id}`, {})
       alert(`Status: ${res.data.status}\nRows: ${res.data.data.length}`)
       if(activeTab === 'history') fetchHistory()
-    } catch (err) {
-      alert("Execution Failed")
-    }
+    } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
 
   return (
@@ -188,6 +211,9 @@ function App() {
 
       <nav className="sidebar">
         <h2>DQ OS</h2>
+        <button onClick={() => setActiveTab('datahub')} className={activeTab === 'datahub' ? 'active' : ''}>
+          Data Hub
+        </button>
         <button onClick={() => setActiveTab('playground')} className={activeTab === 'playground' ? 'active' : ''}>
           Playground
         </button>
@@ -203,43 +229,45 @@ function App() {
         {/* TAB 1: PLAYGROUND */}
         {activeTab === 'playground' && (
           <div className="card">
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
               <h3>{editingId ? `Editing Rule #${editingId}` : "SQL Editor"}</h3>
               {editingId && <button className="small-btn" onClick={() => {setEditingId(null); setRuleName(""); setSql("")}} style={{background:'#64748b'}}>Cancel Edit</button>}
             </div>
-            
+
+            {/* SOURCE SELECTOR */}
+            <div style={{marginBottom: '1rem'}}>
+              <label style={{fontWeight:'bold', color:'#64748b', display:'block', marginBottom:'5px'}}>Target Data Source</label>
+              <select 
+                value={selectedSourceId} 
+                onChange={(e) => setSelectedSourceId(e.target.value)}
+                style={{width:'100%', padding:'10px', borderRadius:'6px', color: '#2a303d', border:'1px solid #cbd5e1', background:'white'}}
+              >
+                <option value="">-- Select a Database --</option>
+                {sources.map(s => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+              </select>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{marginBottom: '5px', fontWeight: 'bold', color: '#64748b'}}>SQL Query</label>
+                <label style={{fontWeight:'bold', color:'#64748b', marginBottom:'5px'}}>SQL Query</label>
                 <textarea value={sql} onChange={(e) => setSql(e.target.value)} rows={12} placeholder="SELECT * FROM table..." />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{marginBottom: '5px', fontWeight: 'bold', color: '#64748b'}}>Params (JSON)</label>
-                <textarea value={params} onChange={(e) => setParams(e.target.value)} rows={12} placeholder="{}"  style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                <label style={{fontWeight:'bold', color:'#64748b', marginBottom:'5px'}}>Params (JSON)</label>
+                <textarea value={params} onChange={(e) => setParams(e.target.value)} rows={12} style={{fontFamily:'monospace', fontSize:'0.85rem'}} />
               </div>
             </div>
 
             <div className="actions">
               <input placeholder="Rule Name" value={ruleName} onChange={(e) => setRuleName(e.target.value)} style={{flex: 1}} />
-              <button onClick={saveOrUpdateRule} className="secondary">
-                {editingId ? "Update Rule" : "Save as Rule"}
-              </button>
+              <button onClick={saveOrUpdateRule} className="secondary">{editingId ? "Update" : "Save"}</button>
               <button onClick={runAdHoc} className="primary">Run Now</button>
             </div>
 
             {result && (
-              <div className="results">
+              <div className="results" style={{height: '400px', display: 'flex', flexDirection: 'column', marginTop: '20px', background:'white', padding:'10px', border:'1px solid #e2e8f0', borderRadius:'8px'}}>
                 <h4>Result Preview ({result.length} rows)</h4>
-                <div style={{
-                  overflowX: 'auto',
-                  overflowY: 'auto',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '6px',
-                  marginTop: '1rem',
-                  maxHeight: '240px'
-                }}>
-                  <ResultsTable data={result} />
-                </div>
+                <ResultsTable data={result} />
               </div>
             )}
           </div>
@@ -250,12 +278,16 @@ function App() {
           <div className="card">
             <h3>Your Rule Library</h3>
             <table className="rule-table">
-              <thead><tr><th>ID</th><th>Name</th><th>Actions</th></tr></thead>
+              <thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Actions</th></tr></thead>
               <tbody>
                 {rules.map(r => (
                   <tr key={r.id}>
-                    <td style={{width:'50px'}}>{r.id}</td>
+                    <td>{r.id}</td>
                     <td>{r.name}</td>
+                    <td>
+                      {/* Show Source Name if available */}
+                      {sources.find(s => s.id === r.source_id)?.name || "Unknown"}
+                    </td>
                     <td style={{display:'flex', gap:'10px'}}>
                       <button onClick={() => executeRule(r.id)} className="small-btn">Run</button>
                       <button onClick={() => editRule(r)} className="small-btn" style={{background:'#64748b'}}>Edit</button>
@@ -267,7 +299,80 @@ function App() {
           </div>
         )}
 
-        {/* TAB 3: HISTORY */}
+        {/* TAB 3: DATA HUB (NEW) */}
+        {activeTab === 'datahub' && (
+          <div className="card">
+            <h3>Data Hub Configuration</h3>
+            
+            <div style={{background:'#f8fafc', padding:'20px', borderRadius:'8px', marginBottom:'20px', border: '1px solid #e2e8f0'}}>
+              <h4 style={{marginBottom:'15px', color:'#334155'}}>Add New Data Source</h4>
+              
+              <div style={{display:'grid', gridTemplateColumns:'1fr 2fr', gap:'15px', marginBottom:'15px'}}>
+                <div>
+                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Friendly Name</label>
+                  <input 
+                    placeholder="e.g. Sales DB (SQL Server)" 
+                    value={newSourceName} 
+                    onChange={(e) => setNewSourceName(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Connection URL</label>
+                  <input 
+                    placeholder="dialect+driver://user:pass@host/db" 
+                    value={newSourceUrl} 
+                    onChange={(e) => setNewSourceUrl(e.target.value)} 
+                    style={{fontFamily: 'monospace'}}
+                  />
+                </div>
+                <div>
+                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Type</label>
+                  <input 
+                    placeholder="postgres, mysql, mssql, etc." 
+                    value={newSourceType} 
+                    onChange={(e) => setNewSourceType(e.target.value)} 
+                  />
+                </div>
+              </div>
+
+              <div style={{display:'flex', gap:'10px'}}>
+                <button 
+                  onClick={async () => {
+                    if(!newSourceUrl) return alert("Enter a URL first");
+                    try {
+                      const res = await axios.post(`${API_URL}/test-connection`, { connection_url: newSourceUrl });
+                      if(res.data.status === 'success') alert("✅ " + res.data.message);
+                      else alert("❌ " + res.data.message);
+                    } catch(e) { alert("Test Failed: " + e.message) }
+                  }} 
+                  className="secondary"
+                >
+                  Test Connection
+                </button>
+
+                <button onClick={createSource} className="primary">
+                  Add Source
+                </button>
+              </div>
+            </div>
+
+            <table className="rule-table">
+              <thead><tr><th>ID</th><th>Name</th><th>Connection String</th><th>Type</th></tr></thead>
+              <tbody>
+                {sources.map(s => (
+                  <tr key={s.id}>
+                    <td>{s.id}</td>
+                    <td>{s.name}</td>
+                    <td style={{fontFamily:'monospace', fontSize:'0.85rem', color:'#475569'}}>{s.connection_url}</td>
+                    <td>{s.type}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* TAB 4: HISTORY */}
         {activeTab === 'history' && (
           <div className="card">
             <h3>Execution Logs</h3>
@@ -279,11 +384,7 @@ function App() {
                     <td>{run.executed_at}</td>
                     <td>{run.rule}</td>
                     <td><span className={`status-badge ${run.status === 'PASS' ? 'pass' : 'fail'}`}>{run.status}</span></td>
-                    <td>
-                      <button className="secondary" style={{padding:'4px 8px', fontSize:'0.75rem'}} onClick={() => setModalData(run.result)}>
-                        View Results
-                      </button>
-                    </td>
+                    <td><button className="secondary" style={{padding:'4px 8px', fontSize:'0.75rem'}} onClick={() => setModalData(run.result)}>View Results</button></td>
                   </tr>
                 ))}
               </tbody>
