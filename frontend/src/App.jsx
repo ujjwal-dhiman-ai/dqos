@@ -95,7 +95,11 @@ function App() {
   const [history, setHistory] = useState([])
   const [modalData, setModalData] = useState(null) // For the popup
   
-  const API_URL = "http://localhost:8000"
+  // OLD
+  // const API_URL = "http://localhost:8000"
+
+  // NEW
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
   useEffect(() => {
     if (activeTab === 'rules') fetchRules()

@@ -7,9 +7,23 @@ from datetime import datetime
 from typing import Optional, Any, Dict
 import json
 
+# NEW (Dynamic)
+import os
+
+# 1. Get URL from Environment, or fallback to localhost for testing
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://postgres:mitthu@localhost:5432/postgres")
+
+# 2. Fix for Render (Render uses 'postgres://' but SQLAlchemy needs 'postgresql://')
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+METADATA_DB_URL = DATABASE_URL
+TARGET_DB_URL = DATABASE_URL  # For now, we test against the same DB
+
 # --- DATABASE CONFIG ---
-METADATA_DB_URL = "postgresql://postgres:mitthu@localhost:5432/postgres"
-TARGET_DB_URL = "postgresql://postgres:mitthu@localhost:5432/postgres"
+# METADATA_DB_URL = "postgresql://postgres:mitthu@localhost:5432/postgres"
+# TARGET_DB_URL = "postgresql://postgres:mitthu@localhost:5432/postgres"
 
 engine_metadata = create_engine(METADATA_DB_URL)
 engine_target = create_engine(TARGET_DB_URL)
@@ -38,13 +52,25 @@ class DQRun(Base):
     executed_at = Column(DateTime, default=datetime.utcnow)
 
 
-Base.metadata.create_all(bind=engine_metadata)
+# Try to create tables, but don't fail if database is unavailable
+try:
+    Base.metadata.create_all(bind=engine_metadata)
+except Exception as e:
+    print(f"Warning: Could not create database tables - {e}")
+    print("Database will be initialized on first endpoint call")
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:5173",
+    # <--- Add your Render/Domain URL here
+    "https://dqos-1.onrender.com",
+    "http://your-vps-ip-address"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
