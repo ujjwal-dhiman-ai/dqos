@@ -4,8 +4,8 @@ import './App.css'
 
 // --- COMPONENT: Dynamic Table for Results ---
 const ResultsTable = ({ data }) => {
-  if (!data || data.length === 0) return <div style={{padding:'10px', color:'#666'}}>No Data Returned (Pass)</div>
-  
+  if (!data || data.length === 0) return <div style={{ padding: '10px', color: '#666' }}>No Data Returned (Pass)</div>
+
   const headers = Object.keys(data[0])
 
   return (
@@ -14,13 +14,13 @@ const ResultsTable = ({ data }) => {
       flexDirection: 'column',
       position: 'relative'        // Needed for sticky header context
     }}>
-      <table className="rule-table" style={{marginTop: 0, borderCollapse: 'separate', borderSpacing: 0}}>
-        <thead style={{position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#f8fafc'}}>
+      <table className="rule-table" style={{ marginTop: 0, borderCollapse: 'separate', borderSpacing: 0 }}>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#f8fafc' }}>
           <tr>
             {headers.map(h => (
               <th key={h} style={{
-                fontSize:'0.8rem', 
-                padding: '12px', 
+                fontSize: '0.8rem',
+                padding: '12px',
                 textAlign: 'left',
                 borderBottom: '2px solid #e2e8f0',
                 backgroundColor: '#f8fafc', // Ensures text doesn't show through header on scroll
@@ -33,11 +33,11 @@ const ResultsTable = ({ data }) => {
         </thead>
         <tbody>
           {data.map((row, i) => (
-            <tr key={i} style={{borderBottom: '1px solid #f1f5f9'}}>
+            <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
               {headers.map(h => (
                 <td key={h} style={{
-                  fontSize:'0.85rem', 
-                  padding: '10px', 
+                  fontSize: '0.85rem',
+                  padding: '10px',
                   borderBottom: '1px solid #f1f5f9',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
@@ -58,19 +58,19 @@ const ResultsTable = ({ data }) => {
 const DataModal = ({ data, onClose }) => {
   if (!data) return null;
   let parsedData = [];
-  try { parsedData = typeof data === 'string' ? JSON.parse(data) : data } catch(e) { parsedData = [] }
+  try { parsedData = typeof data === 'string' ? JSON.parse(data) : data } catch (e) { parsedData = [] }
 
   return (
     <div style={{
-      position:'fixed', top:0, left:0, right:0, bottom:0, 
-      backgroundColor:'rgba(0,0,0,0.5)', display:'flex', flexDirection:'column', justifyContent:'center', alignItems:'center', zIndex:1000
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 1000
     }}>
-      <div className="card" style={{width:'80%', maxHeight:'80vh', display:'flex', flexDirection:'column', position:'relative'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem', flexShrink: 0}}>
-          <h3 style={{margin: 0}}>Run Results</h3>
-          <button onClick={onClose} className="secondary" style={{padding:'5px 10px'}}>Close</button>
+      <div className="card" style={{ width: '80%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexShrink: 0 }}>
+          <h3 style={{ margin: 0 }}>Run Results</h3>
+          <button onClick={onClose} className="secondary" style={{ padding: '5px 10px' }}>Close</button>
         </div>
-        <div style={{overflowY:'auto', overflowX:'auto', flex: 1}}>
+        <div style={{ overflowY: 'auto', overflowX: 'auto', flex: 1 }}>
           <ResultsTable data={parsedData} />
         </div>
       </div>
@@ -80,27 +80,38 @@ const DataModal = ({ data, onClose }) => {
 
 function App() {
   const [activeTab, setActiveTab] = useState('playground')
-  
+
   // PLAYGROUND STATE
   const [sql, setSql] = useState("SELECT * FROM table...")
   const [params, setParams] = useState('{}')
   const [result, setResult] = useState(null)
-  
+
   // RULE MANAGEMENT STATE
   const [rules, setRules] = useState([])
   const [ruleName, setRuleName] = useState("")
   const [editingId, setEditingId] = useState(null) // Track if we are editing
-  const [sources, setSources] = useState([])
-  const [selectedSourceId, setSelectedSourceId] = useState("")
-  
+
+
   // HISTORY STATE
   const [history, setHistory] = useState([])
   const [modalData, setModalData] = useState(null) // For the popup
-  
+
   // DATA HUB FORM STATE
+  const [sources, setSources] = useState([])
+  const [selectedSourceId, setSelectedSourceId] = useState("")
+  const [editingSourceId, setEditingSourceId] = useState(null);
   const [newSourceName, setNewSourceName] = useState("")
   const [newSourceUrl, setNewSourceUrl] = useState("")
   const [newSourceType, setNewSourceType] = useState("") // Default to postgres
+  const [dataHubView, setDataHubView] = useState('list') // Options: 'list', 'create'
+  const [connMode, setConnMode] = useState('url'); // Options: 'url' or 'form'
+  const [dbCreds, setDbCreds] = useState({
+    host: 'localhost',
+    port: '5432',
+    user: 'postgres',
+    password: '',
+    dbname: 'postgres'
+  });
 
   // NEW
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -111,6 +122,26 @@ function App() {
     if (activeTab === 'rules') fetchRules()
     if (activeTab === 'history') fetchHistory()
   }, [activeTab])
+
+  // HELPER: Auto-generate URL when form changes
+  useEffect(() => {
+    if (connMode === 'form') {
+      let generatedUrl = "";
+      const { host, port, user, password, dbname } = dbCreds;
+
+      // Basic logic to construct URL based on selected Type
+      if (newSourceType.includes('postgres')) {
+        generatedUrl = `postgresql://${user}:${password}@${host}:${port}/${dbname}`;
+      } else if (newSourceType.includes('mysql')) {
+        generatedUrl = `mysql+pymysql://${user}:${password}@${host}:${port}/${dbname}`;
+      } else if (newSourceType.includes('mssql')) {
+        generatedUrl = `mssql+pyodbc://${user}:${password}@${host}/${dbname}?driver=ODBC+Driver+17+for+SQL+Server`;
+      } else if (newSourceType.includes('snowflake')) {
+        generatedUrl = `snowflake://${user}:${password}@${host}/${dbname}`;
+      }
+      setNewSourceUrl(generatedUrl);
+    }
+  }, [dbCreds, newSourceType, connMode]);
 
   const fetchSources = async () => {
     try { const res = await axios.get(`${API_URL}/sources/`); setSources(res.data) }
@@ -127,13 +158,46 @@ function App() {
     catch (err) { console.error(err) }
   }
 
-  const createSource = async () => {
+  const saveOrUpdateSource = async () => {
+    if (!newSourceName || !newSourceUrl) return alert("Please fill in all fields");
+
+    const payload = {
+      name: newSourceName,
+      connection_url: newSourceUrl,
+      type: newSourceType || 'postgres'
+    };
+
     try {
-      await axios.post(`${API_URL}/sources/`, { name: newSourceName, connection_url: newSourceUrl, type: newSourceType })
-      alert("Source Added!")
-      setNewSourceName(""); setNewSourceUrl(""); setNewSourceType("")
-      fetchSources()
-    } catch(err) { alert("Error adding source") }
+      if (editingSourceId) {
+        // UPDATE EXISTING
+        await axios.put(`${API_URL}/sources/${editingSourceId}`, payload);
+        alert("Source Updated!");
+      } else {
+        // CREATE NEW
+        await axios.post(`${API_URL}/sources/`, payload);
+        alert("Source Created!");
+      }
+
+      // Reset Form & View
+      setEditingSourceId(null);
+      setNewSourceName(""); setNewSourceUrl(""); setNewSourceType("");
+      setDataHubView('list');
+      fetchSources();
+
+    } catch (err) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
+  const deleteSource = async (id) => {
+    if (!window.confirm("Are you sure? This cannot be undone.")) return;
+    try {
+      await axios.delete(`${API_URL}/sources/${id}`);
+      alert("Source deleted");
+      fetchSources();
+    } catch (err) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
   }
 
   const runAdHoc = async () => {
@@ -142,9 +206,9 @@ function App() {
     try {
       let parsedParams = {}
       try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON Params") }
-      
-      const res = await axios.post(`${API_URL}/run-adhoc`, { 
-        sql, params: parsedParams, source_id: selectedSourceId 
+
+      const res = await axios.post(`${API_URL}/run-adhoc`, {
+        sql, params: parsedParams, source_id: selectedSourceId
       })
       setResult(res.data.data)
     } catch (err) {
@@ -153,21 +217,21 @@ function App() {
   }
 
   const saveOrUpdateRule = async () => {
-    if(!ruleName) return alert("Please name your rule!")
-    if(!selectedSourceId) return alert("Data Source is required!")
+    if (!ruleName) return alert("Please name your rule!")
+    if (!selectedSourceId) return alert("Data Source is required!")
     try {
       // Parse params from the text box
       let parsedParams = {}
       try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON in Parameters") }
 
       // Send params in payload
-      const payload = { 
-        name: ruleName, 
+      const payload = {
+        name: ruleName,
         sql: sql,
         params: parsedParams, // <--- SENDING PARAMS NOW
         source_id: selectedSourceId // <--- SENDING SOURCE ID NOW
       }
-      
+
       if (editingId) {
         await axios.put(`${API_URL}/rules/${editingId}`, payload)
         alert("Rule Updated!")
@@ -175,11 +239,11 @@ function App() {
         await axios.post(`${API_URL}/rules/`, payload)
         alert("Rule Saved!")
       }
-      
+
       setEditingId(null)
       setRuleName("")
       fetchRules()
-      if(activeTab === 'playground') setActiveTab('rules')
+      if (activeTab === 'playground') setActiveTab('rules')
     } catch (err) {
       alert("Error: " + (err.response?.data?.detail || err.message))
     }
@@ -190,7 +254,7 @@ function App() {
     setRuleName(rule.name)
     // Load params back into the text box
     // The backend now returns them in the 'params' field (dict), so we stringify it
-    setParams(JSON.stringify(rule.params || {}, null, 2)) 
+    setParams(JSON.stringify(rule.params || {}, null, 2))
     setSelectedSourceId(rule.source_id) // <--- Load saved source
     setEditingId(rule.id)
     setResult(null)
@@ -201,7 +265,7 @@ function App() {
     try {
       const res = await axios.post(`${API_URL}/run-rule/${id}`, {})
       alert(`Status: ${res.data.status}\nRows: ${res.data.data.length}`)
-      if(activeTab === 'history') fetchHistory()
+      if (activeTab === 'history') fetchHistory()
     } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
 
@@ -229,18 +293,18 @@ function App() {
         {/* TAB 1: PLAYGROUND */}
         {activeTab === 'playground' && (
           <div className="card">
-             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3>{editingId ? `Editing Rule #${editingId}` : "SQL Editor"}</h3>
-              {editingId && <button className="small-btn" onClick={() => {setEditingId(null); setRuleName(""); setSql("")}} style={{background:'#64748b'}}>Cancel Edit</button>}
+              {editingId && <button className="small-btn" onClick={() => { setEditingId(null); setRuleName(""); setSql("") }} style={{ background: '#64748b' }}>Cancel Edit</button>}
             </div>
 
             {/* SOURCE SELECTOR */}
-            <div style={{marginBottom: '1rem'}}>
-              <label style={{fontWeight:'bold', color:'#64748b', display:'block', marginBottom:'5px'}}>Target Data Source</label>
-              <select 
-                value={selectedSourceId} 
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>Target Data Source</label>
+              <select
+                value={selectedSourceId}
                 onChange={(e) => setSelectedSourceId(e.target.value)}
-                style={{width:'100%', padding:'10px', borderRadius:'6px', color: '#2a303d', border:'1px solid #cbd5e1', background:'white'}}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', color: '#2a303d', border: '1px solid #cbd5e1', background: 'white' }}
               >
                 <option value="">-- Select a Database --</option>
                 {sources.map(s => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
@@ -249,23 +313,30 @@ function App() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{fontWeight:'bold', color:'#64748b', marginBottom:'5px'}}>SQL Query</label>
+                <label style={{ fontWeight: 'bold', color: '#64748b', marginBottom: '5px' }}>SQL Query</label>
                 <textarea value={sql} onChange={(e) => setSql(e.target.value)} rows={12} placeholder="SELECT * FROM table..." />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{fontWeight:'bold', color:'#64748b', marginBottom:'5px'}}>Params (JSON)</label>
-                <textarea value={params} onChange={(e) => setParams(e.target.value)} rows={12} style={{fontFamily:'monospace', fontSize:'0.85rem'}} />
+                <label style={{ fontWeight: 'bold', color: '#64748b', marginBottom: '5px' }}>Params (JSON)</label>
+                <textarea value={params} onChange={(e) => setParams(e.target.value)} rows={12} style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
               </div>
             </div>
 
             <div className="actions">
-              <input placeholder="Rule Name" value={ruleName} onChange={(e) => setRuleName(e.target.value)} style={{flex: 1}} />
+              <input placeholder="Rule Name" value={ruleName} onChange={(e) => setRuleName(e.target.value)} style={{ flex: 1 }} />
               <button onClick={saveOrUpdateRule} className="secondary">{editingId ? "Update" : "Save"}</button>
               <button onClick={runAdHoc} className="primary">Run Now</button>
             </div>
 
             {result && (
-              <div className="results" style={{height: '400px', display: 'flex', flexDirection: 'column', marginTop: '20px', background:'white', padding:'10px', border:'1px solid #e2e8f0', borderRadius:'8px'}}>
+              <div className="results" style={{
+                overflowX: 'auto',
+                overflowY: 'auto',
+                border: '1px solid #e2e8f0',
+                borderRadius: '6px',
+                marginTop: '1rem',
+                maxHeight: '240px'
+              }}>
                 <h4>Result Preview ({result.length} rows)</h4>
                 <ResultsTable data={result} />
               </div>
@@ -288,9 +359,9 @@ function App() {
                       {/* Show Source Name if available */}
                       {sources.find(s => s.id === r.source_id)?.name || "Unknown"}
                     </td>
-                    <td style={{display:'flex', gap:'10px'}}>
+                    <td style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => executeRule(r.id)} className="small-btn">Run</button>
-                      <button onClick={() => editRule(r)} className="small-btn" style={{background:'#64748b'}}>Edit</button>
+                      <button onClick={() => editRule(r)} className="small-btn" style={{ background: '#64748b' }}>Edit</button>
                     </td>
                   </tr>
                 ))}
@@ -299,96 +370,344 @@ function App() {
           </div>
         )}
 
-        {/* TAB 3: DATA HUB (NEW) */}
+        {/* TAB 3: DATA HUB (Dynamic Height - No Internal Scroll) */}
         {activeTab === 'datahub' && (
-          <div className="card">
-            <h3>Data Hub Configuration</h3>
-            
-            <div style={{background:'#f8fafc', padding:'20px', borderRadius:'8px', marginBottom:'20px', border: '1px solid #e2e8f0'}}>
-              <h4 style={{marginBottom:'15px', color:'#334155'}}>Add New Data Source</h4>
-              
-              <div style={{display:'grid', gridTemplateColumns:'1fr 2fr', gap:'15px', marginBottom:'15px'}}>
-                <div>
-                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Friendly Name</label>
-                  <input 
-                    placeholder="e.g. Sales DB (SQL Server)" 
-                    value={newSourceName} 
-                    onChange={(e) => setNewSourceName(e.target.value)} 
-                  />
-                </div>
-                <div>
-                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Connection URL</label>
-                  <input 
-                    placeholder="dialect+driver://user:pass@host/db" 
-                    value={newSourceUrl} 
-                    onChange={(e) => setNewSourceUrl(e.target.value)} 
-                    style={{fontFamily: 'monospace'}}
-                  />
-                </div>
-                <div>
-                  <label style={{display:'block', marginBottom:'5px', fontSize:'0.9rem', fontWeight:'600', color:'#64748b'}}>Type</label>
-                  <input 
-                    placeholder="postgres, mysql, mssql, etc." 
-                    value={newSourceType} 
-                    onChange={(e) => setNewSourceType(e.target.value)} 
-                  />
-                </div>
+          <div className="card" style={{
+            padding: '30px',
+            display: 'flex',
+            flexDirection: 'column',
+            // 1. FIX: Constrain height for List, let it grow for Form
+            height: dataHubView === 'list' ? '85vh' : 'auto',
+            minHeight: '85vh',
+          }}>
+
+            {/* HEADER */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #e2e8f0', paddingBottom: '20px' }}>
+              <div>
+                <h2 style={{ margin: 0, color: '#0f172a' }}>Data Configuration</h2>
+                <p style={{ margin: '5px 0 0 0', color: '#64748b' }}>Manage your database connections.</p>
               </div>
 
-              <div style={{display:'flex', gap:'10px'}}>
-                <button 
-                  onClick={async () => {
-                    if(!newSourceUrl) return alert("Enter a URL first");
-                    try {
-                      const res = await axios.post(`${API_URL}/test-connection`, { connection_url: newSourceUrl });
-                      if(res.data.status === 'success') alert("✅ " + res.data.message);
-                      else alert("❌ " + res.data.message);
-                    } catch(e) { alert("Test Failed: " + e.message) }
-                  }} 
-                  className="secondary"
+              <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+                <button
+                  onClick={() => { setDataHubView('list'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); }}
+                  style={{
+                    background: dataHubView === 'list' ? '#ffffff' : 'transparent',
+                    color: dataHubView === 'list' ? '#0f172a' : '#64748b',
+                    fontWeight: '600', padding: '8px 20px', borderRadius: '6px', border: 'none',
+                    boxShadow: dataHubView === 'list' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
                 >
-                  Test Connection
+                  Managed Sources
                 </button>
-
-                <button onClick={createSource} className="primary">
-                  Add Source
+                <button
+                  onClick={() => { setDataHubView('create'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); }}
+                  style={{
+                    background: dataHubView === 'create' ? '#ffffff' : 'transparent',
+                    color: dataHubView === 'create' ? '#0f172a' : '#64748b',
+                    fontWeight: '600', padding: '8px 20px', borderRadius: '6px', border: 'none',
+                    boxShadow: dataHubView === 'create' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                >
+                  {editingSourceId ? "✏️ Editing Source" : "+ New Connection"}
                 </button>
               </div>
             </div>
 
-            <table className="rule-table">
-              <thead><tr><th>ID</th><th>Name</th><th>Connection String</th><th>Type</th></tr></thead>
-              <tbody>
-                {sources.map(s => (
-                  <tr key={s.id}>
-                    <td>{s.id}</td>
-                    <td>{s.name}</td>
-                    <td style={{fontFamily:'monospace', fontSize:'0.85rem', color:'#475569'}}>{s.connection_url}</td>
-                    <td>{s.type}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {/* CONTENT AREA - Grows Dynamically */}
+            <div style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              // 2. FIX: 'hidden' forces the child to handle scrolling. 'visible' lets the form grow.
+              overflow: dataHubView === 'list' ? 'hidden' : 'visible'
+            }}>
+
+              {/* VIEW 1: LIST */}
+              {dataHubView === 'list' && (
+                // Added flex: 1 and overflow: auto here to create the internal scroll area
+                <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                  <table className="rule-table" style={{ margin: 0, width: '100%', border: 'none' }}>
+                    <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <tr>
+                        <th style={{ padding: '15px' }}>Name</th>
+                        <th style={{ padding: '15px' }}>Type</th>
+                        {/* <th style={{ padding: '15px' }}>Connection URL</th> */}
+                        <th style={{ padding: '15px', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sources.map(s => (
+                        <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '15px', fontWeight: '500' }}>{s.name}</td>
+                          <td style={{ padding: '15px' }}>
+                            <span style={{ background: '#e0f2fe', color: '#0284c7', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                              {s.type || 'DB'}
+                            </span>
+                          </td>
+                          {/* <td style={{ padding: '15px', fontFamily: 'monospace', color: '#64748b', fontSize: '0.85rem' }}>
+                            {s.connection_url ? s.connection_url.replace(/:[^:@]+@/, ':*****@') : ''}
+                          </td> */}
+                          <td style={{ padding: '15px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                              <button
+                                onClick={() => {
+                                  setEditingSourceId(s.id);
+                                  setNewSourceName(s.name);
+                                  setNewSourceUrl(s.connection_url);
+                                  setNewSourceType(s.type);
+                                  setConnMode('url');
+                                  setDataHubView('create');
+                                }}
+                                className="small-btn" style={{ background: 'white', border: '1px solid #cbd5e1', color: '#334155' }}
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button
+                                onClick={() => deleteSource(s.id)}
+                                className="small-btn" style={{ background: '#fff1f2', border: '1px solid #fecaca', color: '#e11d48' }}
+                              >
+                                🗑️ Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {sources.length === 0 && (
+                        <tr><td colSpan="4" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No data sources found.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* VIEW 2: FORM (CREATE / EDIT) - Grows infinitely */}
+              {dataHubView === 'create' && (
+                <div style={{ maxWidth: '800px', margin: '0 auto', width: '100%', marginTop: '20px', paddingBottom: '40px' }}>
+                  <div style={{ background: '#ffffff', padding: '40px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+
+                    {/* Title */}
+                    <div style={{ marginBottom: '30px', borderBottom: '1px solid #f1f5f9', paddingBottom: '20px' }}>
+                      <h3 style={{ margin: 0, color: '#0f172a', fontSize: '1.25rem' }}>
+                        {editingSourceId ? `Edit Source #${editingSourceId}` : "Connect New Data Source"}
+                      </h3>
+                      <p style={{ color: '#64748b', margin: '5px 0 0 0', fontSize: '0.9rem' }}>
+                        Configure access to your database.
+                      </p>
+                    </div>
+
+                    {/* 1. Basic Info Row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155', fontSize: '0.9rem' }}>Friendly Name <span style={{ color: 'red' }}>*</span></label>
+                        <input
+                          placeholder="e.g. Production Snowflake"
+                          value={newSourceName}
+                          onChange={(e) => setNewSourceName(e.target.value)}
+                          style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155', fontSize: '0.9rem' }}>Database Type</label>
+                        <select
+                          value={newSourceType}
+                          onChange={(e) => setNewSourceType(e.target.value)}
+                          style={{ width: '100%', padding: '12px', borderRadius: '8px', color: '#1c2027', border: '1px solid #cbd5e1', background: 'white', fontSize: '0.95rem' }}
+                        >
+                          <option value="">-- Select Type --</option>
+                          <option value="postgres">PostgreSQL</option>
+                          <option value="mysql">MySQL</option>
+                          <option value="mssql">SQL Server</option>
+                          <option value="snowflake">Snowflake</option>
+                          <option value="oracle">Oracle</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* 2. Connection Method Toggle */}
+                    <div style={{ background: '#f1f5f9', padding: '5px', borderRadius: '8px', display: 'flex', marginBottom: '30px' }}>
+                      <button
+                        onClick={() => setConnMode('form')}
+                        style={{
+                          flex: 1, padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s',
+                          background: connMode === 'form' ? 'white' : 'transparent',
+                          color: connMode === 'form' ? '#0f172a' : '#64748b',
+                          boxShadow: connMode === 'form' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        🧱 Form Builder
+                      </button>
+                      <button
+                        onClick={() => setConnMode('url')}
+                        style={{
+                          flex: 1, padding: '10px', borderRadius: '6px', border: 'none', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s',
+                          background: connMode === 'url' ? 'white' : 'transparent',
+                          color: connMode === 'url' ? '#0f172a' : '#64748b',
+                          boxShadow: connMode === 'url' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        🔗 Raw Connection String
+                      </button>
+                    </div>
+
+                    {/* 3A. The Form Builder */}
+                    {connMode === 'form' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: '#64748b' }}>Host / Server IP</label>
+                          <input
+                            value={dbCreds.host}
+                            onChange={(e) => setDbCreds({ ...dbCreds, host: e.target.value })}
+                            placeholder="localhost"
+                            style={{ width: '100%', padding: '10px', marginTop: '5px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: '#64748b' }}>Port</label>
+                          <input
+                            value={dbCreds.port}
+                            onChange={(e) => setDbCreds({ ...dbCreds, port: e.target.value })}
+                            placeholder="5432"
+                            style={{ width: '100%', padding: '10px', marginTop: '5px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: '#64748b' }}>Username</label>
+                          <input
+                            value={dbCreds.user}
+                            onChange={(e) => setDbCreds({ ...dbCreds, user: e.target.value })}
+                            placeholder="user"
+                            style={{ width: '100%', padding: '10px', marginTop: '5px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: '#64748b' }}>Password</label>
+                          <input
+                            type="password"
+                            value={dbCreds.password}
+                            onChange={(e) => setDbCreds({ ...dbCreds, password: e.target.value })}
+                            placeholder="••••••"
+                            style={{ width: '100%', padding: '10px', marginTop: '5px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                          />
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: '#64748b' }}>Database Name</label>
+                          <input
+                            value={dbCreds.dbname}
+                            onChange={(e) => setDbCreds({ ...dbCreds, dbname: e.target.value })}
+                            placeholder="my_database"
+                            style={{ width: '100%', padding: '10px', marginTop: '5px', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3B. The URL Input */}
+                    <div style={{ marginBottom: '30px' }}>
+                      <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155', fontSize: '0.9rem' }}>
+                        Connection String {connMode === 'form' && <span style={{ color: '#0ea5e9' }}>(Auto-Generated)</span>}
+                      </label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          placeholder="dialect+driver://user:pass@host/db"
+                          value={newSourceUrl}
+                          readOnly={connMode === 'form'}
+                          onChange={(e) => setNewSourceUrl(e.target.value)}
+                          style={{
+                            width: '100%', padding: '15px', borderRadius: '8px',
+                            border: '1px solid #cbd5e1', fontFamily: 'monospace', fontSize: '0.9rem',
+                            background: connMode === 'form' ? '#f8fafc' : 'white',
+                            color: connMode === 'form' ? '#64748b' : '#0f172a'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 4. Action Buttons */}
+                    <div style={{ display: 'flex', gap: '15px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
+                      <button
+                        className="secondary"
+                        style={{ flex: 1, padding: '14px', justifyContent: 'center' }}
+                        onClick={async () => {
+                          if (!newSourceUrl) return alert("Enter a URL first");
+                          try {
+                            const res = await axios.post(`${API_URL}/test-connection`, { connection_url: newSourceUrl });
+                            if (res.data.status === 'success') alert("✅ " + res.data.message);
+                            else alert("❌ " + res.data.message);
+                          } catch (e) { alert("Test Failed: " + e.message) }
+                        }}
+                      >
+                        Test Connection
+                      </button>
+
+                      <button
+                        className="primary"
+                        style={{ flex: 1, padding: '14px', justifyContent: 'center' }}
+                        onClick={saveOrUpdateSource}
+                      >
+                        {editingSourceId ? "Update Source" : "Save Source"}
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: '20px', textAlign: 'center' }}>
+                      <button
+                        onClick={() => { setDataHubView('list'); setEditingSourceId(null); }}
+                        style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Cancel and go back
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
+            </div>
           </div>
         )}
 
         {/* TAB 4: HISTORY */}
         {activeTab === 'history' && (
-          <div className="card">
-            <h3>Execution Logs</h3>
-            <table className="rule-table">
-              <thead><tr><th>Time</th><th>Rule</th><th>Status</th><th>Data</th></tr></thead>
-              <tbody>
-                {history.map(run => (
-                  <tr key={run.id}>
-                    <td>{run.executed_at}</td>
-                    <td>{run.rule}</td>
-                    <td><span className={`status-badge ${run.status === 'PASS' ? 'pass' : 'fail'}`}>{run.status}</span></td>
-                    <td><button className="secondary" style={{padding:'4px 8px', fontSize:'0.75rem'}} onClick={() => setModalData(run.result)}>View Results</button></td>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '85vh', overflow: 'hidden' }}>
+            <h3 style={{ marginBottom: '15px' }}>Execution Logs</h3>
+
+            {/* Scrollable Container */}
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              border: '1px solid #e2e8f0',
+              borderRadius: '6px'
+            }}>
+              <table className="rule-table" style={{ marginTop: 0, width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
+                {/* Sticky Header */}
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, backgroundColor: '#f8fafc' }}>
+                  <tr>
+                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Time</th>
+                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Rule</th>
+                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Status</th>
+                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Data</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {history.map(run => (
+                    <tr key={run.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{run.executed_at}</td>
+                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{run.rule}</td>
+                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                        <span className={`status-badge ${run.status === 'PASS' ? 'pass' : run.status === 'FAIL' ? 'fail' : 'error'}`}>
+                          {run.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                        <button className="secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => setModalData(run.result)}>
+                          View Results
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </main>

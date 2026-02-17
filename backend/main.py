@@ -7,9 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from typing import Optional, Any, Dict
 import json
-
-# NEW (Dynamic)
+from cryptography.fernet import Fernet
 import os
+
+# Generate or load a key
+# In production, use: ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+ENCRYPTION_KEY = Fernet.generate_key()
+cipher_suite = Fernet(ENCRYPTION_KEY)
+
+def encrypt_data(data: str) -> str:
+    return cipher_suite.encrypt(data.encode()).decode()
+
+
+def decrypt_data(data: str) -> str:
+    return cipher_suite.decrypt(data.encode()).decode()
 
 # 1. Get URL from Environment, or fallback to localhost for testing
 DATABASE_URL = os.getenv(
@@ -35,12 +46,18 @@ Base = declarative_base()
 # --- MODELS ---
 
 
-class DQSource(Base):  # <--- NEW TABLE
+class DQSource(Base):
     __tablename__ = "dq_data_sources"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True)
-    connection_url = Column(Text)  # e.g. "postgresql://user:pass@host/db"
-    type = Column(String)
+    type = Column(String)  # postgres, mysql, etc.
+    host = Column(String)
+    port = Column(Integer)
+    username = Column(String)
+    password = Column(Text)  # This will be the encrypted string
+    database = Column(String)
+    # connection_url becomes a computed property or remains for legacy
+    connection_url = Column(Text, nullable=True)
 
 
 class DQRule(Base):
@@ -70,10 +87,6 @@ class DQRun(Base):
     result_json = Column(Text)
     executed_at = Column(DateTime, default=datetime.utcnow)
     
-
-class ConnectionTest(BaseModel):
-    connection_url: str
-
 
 # Try to create tables, but don't fail if database is unavailable
 try:
@@ -135,6 +148,19 @@ class AdHocCheck(BaseModel):
     sql: str
     params: dict = {}
     source_id: int  # <--- REQUIRED NOW
+
+class ConnectionTest(BaseModel):
+    connection_url: str
+    
+class CredentialSource(BaseModel):
+    name: str
+    db_type: str  # 'postgres', 'mysql', 'mssql', 'snowflake'
+    host: str
+    port: int
+    username: str
+    password: str
+    database: str
+
     
     
 # --- HELPER: Dynamic Execution ---
@@ -160,6 +186,38 @@ def execute_on_source(source_url: str, sql: str, params: dict):
 
 # --- ENDPOINTS ---
 
+@app.post("/sources/credentials")
+def create_source_via_creds(src: CredentialSource, db: Session = Depends(get_db)):
+    # 1. Build the dialect-specific URL
+    if src.db_type == 'postgres':
+        url = f"postgresql://{src.username}:{src.password}@{src.host}:{src.port}/{src.database}"
+    elif src.db_type == 'mysql':
+        url = f"mysql+pymysql://{src.username}:{src.password}@{src.host}:{src.port}/{src.database}"
+    elif src.db_type == 'mssql':
+        url = f"mssql+pyodbc://{src.username}:{src.password}@{src.host}/{src.database}?driver=ODBC+Driver+17+for+SQL+Server"
+    else:
+        raise HTTPException(
+            status_code=400, detail="Unsupported DB type for credential form")
+
+    # 2. Encrypt the password before saving
+    encrypted_pw = encrypt_data(src.password)
+
+    new_source = DQSource(
+        name=src.name,
+        type=src.db_type,
+        host=src.host,
+        port=src.port,
+        username=src.username,
+        password=encrypted_pw,
+        database=src.database,
+        # Stored for execution, but password inside is raw (temp)
+        connection_url=url
+    )
+
+    db.add(new_source)
+    db.commit()
+    return {"message": "Source secured and saved"}
+
 # 1. DATA SOURCES
 @app.post("/sources/")
 def create_source(source: SourceCreate, db: Session = Depends(get_db)):
@@ -178,6 +236,47 @@ def create_source(source: SourceCreate, db: Session = Depends(get_db)):
 @app.get("/sources/")
 def list_sources(db: Session = Depends(get_db)):
     return db.query(DQSource).all()
+
+# --- UPDATE SOURCE ---
+
+
+@app.put("/sources/{source_id}")
+def update_source(source_id: int, source: SourceCreate, db: Session = Depends(get_db)):
+    db_source = db.query(DQSource).filter(DQSource.id == source_id).first()
+    if not db_source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    db_source.name = source.name
+    db_source.connection_url = source.connection_url
+    db_source.type = source.type
+
+    try:
+        db.commit()
+        db.refresh(db_source)
+        return db_source
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- DELETE SOURCE ---
+
+
+@app.delete("/sources/{source_id}")
+def delete_source(source_id: int, db: Session = Depends(get_db)):
+    # Check if used in rules first (Optional check, or let DB foreign key handle it)
+    source = db.query(DQSource).filter(DQSource.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    try:
+        db.delete(source)
+        db.commit()
+        return {"message": "Source deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        # This catches Foreign Key violations (e.g. if a Rule is using this source)
+        raise HTTPException(
+            status_code=400, detail="Cannot delete: This source is currently used by saved Rules.")
 
 
 @app.post("/test-connection")
@@ -343,5 +442,6 @@ def get_run_history(limit: int = 50, db: Session = Depends(get_db)):
             "result": run.result_json
         })
     return history
+
 
 
