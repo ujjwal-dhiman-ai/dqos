@@ -85,6 +85,7 @@ function App() {
   const [sql, setSql] = useState("SELECT * FROM table...")
   const [params, setParams] = useState('{}')
   const [result, setResult] = useState(null)
+  const [pgIsRunning, setPgIsRunning] = useState(false)
 
   // RULE MANAGEMENT STATE
   const [rules, setRules] = useState([])
@@ -158,6 +159,15 @@ function App() {
     catch (err) { console.error(err) }
   }
 
+  const resetForm = () => {
+    setEditingSourceId(null);
+    setNewSourceName("");
+    setNewSourceUrl("");
+    setNewSourceType("");
+    setConnMode('form'); // Reset to default mode
+    setDbCreds({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres' });
+  }
+
   const saveOrUpdateSource = async () => {
     if (!newSourceName || !newSourceUrl) return alert("Please fill in all fields");
 
@@ -178,11 +188,11 @@ function App() {
         alert("Source Created!");
       }
 
+      resetForm();
+
       // Reset Form & View
-      setEditingSourceId(null);
-      setNewSourceName(""); setNewSourceUrl(""); setNewSourceType("");
+      await fetchSources();
       setDataHubView('list');
-      fetchSources();
 
     } catch (err) {
       alert("Error: " + (err.response?.data?.detail || err.message));
@@ -269,6 +279,7 @@ function App() {
     } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
 
+  
   return (
     <div className="container">
       {modalData && <DataModal data={modalData} onClose={() => setModalData(null)} />}
@@ -390,7 +401,7 @@ function App() {
 
               <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
                 <button
-                  onClick={() => { setDataHubView('list'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); }}
+                  onClick={() => { setDataHubView('list'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); resetForm(); }}
                   style={{
                     background: dataHubView === 'list' ? '#ffffff' : 'transparent',
                     color: dataHubView === 'list' ? '#0f172a' : '#64748b',
@@ -401,7 +412,7 @@ function App() {
                   Managed Sources
                 </button>
                 <button
-                  onClick={() => { setDataHubView('create'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); }}
+                  onClick={() => { setDataHubView('create'); setEditingSourceId(null); setNewSourceName(""); setNewSourceUrl(""); setNewSourceType(""); resetForm(); }}
                   style={{
                     background: dataHubView === 'create' ? '#ffffff' : 'transparent',
                     color: dataHubView === 'create' ? '#0f172a' : '#64748b',
@@ -651,7 +662,7 @@ function App() {
 
                     <div style={{ marginTop: '20px', textAlign: 'center' }}>
                       <button
-                        onClick={() => { setDataHubView('list'); setEditingSourceId(null); }}
+                        onClick={() => { setDataHubView('list'); setEditingSourceId(null); resetForm(); }}
                         style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', textDecoration: 'underline' }}
                       >
                         Cancel and go back
