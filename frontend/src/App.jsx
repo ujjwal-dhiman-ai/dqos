@@ -168,6 +168,15 @@ function App() {
     setDbCreds({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres' });
   }
 
+  const resetPlayground = () => {
+    setEditingId(null);
+    setRuleName("");
+    setSql("SELECT * FROM table...");
+    setParams("{}");
+    setSelectedSourceId("");
+    setResult(null);
+  }
+
   const saveOrUpdateSource = async () => {
     if (!newSourceName || !newSourceUrl) return alert("Please fill in all fields");
 
@@ -211,18 +220,54 @@ function App() {
   }
 
   const runAdHoc = async () => {
-    setResult(null)
-    if (!selectedSourceId) return alert("Please select a Data Source first!")
-    try {
-      let parsedParams = {}
-      try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON Params") }
+    if (!selectedSourceId) return alert("Please select a Data Source first!");
+    if (!sql.trim()) return alert("SQL Query cannot be empty.");
 
+    let parsedParams = {};
+    try {
+      parsedParams = params.trim() ? JSON.parse(params) : {};
+    } catch (e) {
+      return alert("Invalid JSON format in the Params field.");
+    }
+
+    setPgIsRunning(true);
+    setResult(null); // Clear previous results
+
+    try {
+      // 1. MATCH YOUR BACKEND ENDPOINT EXACTLY
       const res = await axios.post(`${API_URL}/run-adhoc`, {
-        sql, params: parsedParams, source_id: selectedSourceId
-      })
-      setResult(res.data.data)
+        source_id: parseInt(selectedSourceId),
+        sql: sql,             // Changed to match your AdHocCheck model
+        params: parsedParams
+      });
+
+      const responseData = res.data.data;
+
+      // Extract column names dynamically
+      let columns = [];
+      if (responseData && responseData.length > 0) {
+        columns = Object.keys(responseData[0]);
+      }
+
+      // 2. DETERMINE PASS/FAIL LOCALLY
+      // Since your /run-adhoc doesn't return PASS/FAIL, we calculate it here: 0 rows = PASS
+      const isPass = responseData.length === 0;
+
+      // Update Result state
+      setResult({
+        status: 'success',
+        rule_status: isPass ? 'PASS' : 'FAIL',
+        columns: columns,
+        data: responseData
+      });
+
     } catch (err) {
-      alert("Error: " + (err.response?.data?.detail || err.message))
+      setResult({
+        status: 'error',
+        message: err.response?.data?.detail || err.message || "Execution failed."
+      });
+    } finally {
+      setPgIsRunning(false);
     }
   }
 
@@ -286,72 +331,155 @@ function App() {
 
       <nav className="sidebar">
         <h2>DQ OS</h2>
-        <button onClick={() => setActiveTab('datahub')} className={activeTab === 'datahub' ? 'active' : ''}>
+        <button onClick={() => { setActiveTab('datahub'); resetPlayground(); }} className={activeTab === 'datahub' ? 'active' : ''}>
           Data Hub
         </button>
         <button onClick={() => setActiveTab('playground')} className={activeTab === 'playground' ? 'active' : ''}>
-          Playground
+          PlayGround
         </button>
-        <button onClick={() => { setActiveTab('rules'); setEditingId(null); setRuleName("") }} className={activeTab === 'rules' ? 'active' : ''}>
+        <button onClick={() => { setActiveTab('rules'); resetPlayground(); }} className={activeTab === 'rules' ? 'active' : ''}>
           Saved Rules
         </button>
-        <button onClick={() => setActiveTab('history')} className={activeTab === 'history' ? 'active' : ''}>
+        <button onClick={() => { setActiveTab('history'); resetPlayground(); }} className={activeTab === 'history' ? 'active' : ''}>
           Run History
         </button>
       </nav>
 
       <main className="content">
-        {/* TAB 1: PLAYGROUND */}
+        {/* TAB 1: PLAYGROUND (REDESIGNED & EXPANDED) */}
         {activeTab === 'playground' && (
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>{editingId ? `Editing Rule #${editingId}` : "SQL Editor"}</h3>
-              {editingId && <button className="small-btn" onClick={() => { setEditingId(null); setRuleName(""); setSql("") }} style={{ background: '#64748b' }}>Cancel Edit</button>}
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minHeight: '85vh', width: '100%' }}>
 
-            {/* SOURCE SELECTOR */}
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '5px' }}>Target Data Source</label>
-              <select
-                value={selectedSourceId}
-                onChange={(e) => setSelectedSourceId(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', color: '#2a303d', border: '1px solid #cbd5e1', background: 'white' }}
-              >
-                <option value="">-- Select a Database --</option>
-                {sources.map(s => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
-              </select>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '20px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{ fontWeight: 'bold', color: '#64748b', marginBottom: '5px' }}>SQL Query</label>
-                <textarea value={sql} onChange={(e) => setSql(e.target.value)} rows={12} placeholder="SELECT * FROM table..." />
+            {/* TOP PANEL: SQL EDITOR */}
+            <div className="card" style={{ width: '100%', padding: '30px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', borderBottom: '1px solid #f1f5f9', paddingBottom: '15px' }}>
+                <div>
+                  <h2 style={{ margin: 0, color: '#0f172a' }}>{editingId ? `Editing Rule #${editingId}` : "Data Quality PlayGround"}</h2>
+                  <p style={{ margin: '5px 0 0 0', color: '#64748b' }}>Write, test, and save data quality rules.</p>
+                </div>
+                {/* Uses the new reset helper on cancel */}
+                {editingId && <button className="small-btn" onClick={resetPlayground} style={{ background: '#64748b' }}>Cancel Edit</button>}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <label style={{ fontWeight: 'bold', color: '#64748b', marginBottom: '5px' }}>Params (JSON)</label>
-                <textarea value={params} onChange={(e) => setParams(e.target.value)} rows={12} style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+
+              {/* Target Source Dropdown */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155' }}>Target Data Source</label>
+                <select
+                  value={selectedSourceId}
+                  onChange={(e) => setSelectedSourceId(e.target.value)}
+                  style={{ width: '100%', padding: '12px', borderRadius: '8px', color: '#0f172a', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', fontSize: '0.95rem' }}
+                >
+                  <option value="">-- Select a Database --</option>
+                  {sources.map(s => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.type?.toUpperCase() || 'DB'})</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Editor Split: Query & Params */}
+              <div style={{ display: 'flex', gap: '20px', marginBottom: '25px' }}>
+                <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155' }}>SQL Query</label>
+                  <textarea
+                    value={sql}
+                    onChange={(e) => setSql(e.target.value)}
+                    style={{ flex: 1, minHeight: '220px', padding: '15px', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', resize: 'vertical' }}
+                  />
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155' }}>Params (JSON)</label>
+                  <textarea
+                    value={params}
+                    onChange={(e) => setParams(e.target.value)}
+                    style={{ flex: 1, minHeight: '220px', padding: '15px', fontFamily: 'monospace', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', resize: 'vertical' }}
+                  />
+                </div>
+              </div>
+
+              {/* Bottom Action Bar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '20px', background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '15px' }}>
+                  <label style={{ fontWeight: '600', color: '#334155', whiteSpace: 'nowrap' }}>Rule Name:</label>
+                  <input
+                    placeholder="e.g. Check Null Emails"
+                    value={ruleName}
+                    onChange={(e) => setRuleName(e.target.value)}
+                    style={{ width: '100%', maxWidth: '400px', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={saveOrUpdateRule} className="secondary" style={{ padding: '12px 24px', background: 'white', border: '1px solid #cbd5e1', color: '#334155', fontWeight: '600' }}>
+                    💾 {editingId ? "Update Rule" : "Save Rule"}
+                  </button>
+                  <button
+                    className="primary"
+                    onClick={runAdHoc}
+                    disabled={pgIsRunning}
+                    style={{ padding: '12px 24px', fontWeight: '600', opacity: pgIsRunning ? 0.7 : 1 }}
+                  >
+                    {pgIsRunning ? '⏳ Executing...' : '▶ Run Query'}
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="actions">
-              <input placeholder="Rule Name" value={ruleName} onChange={(e) => setRuleName(e.target.value)} style={{ flex: 1 }} />
-              <button onClick={saveOrUpdateRule} className="secondary">{editingId ? "Update" : "Save"}</button>
-              <button onClick={runAdHoc} className="primary">Run Now</button>
-            </div>
-
+            {/* BOTTOM PANEL: SEPARATE RESULTS VIEW */}
             {result && (
-              <div className="results" style={{
-                overflowX: 'auto',
-                overflowY: 'auto',
-                border: '1px solid #e2e8f0',
-                borderRadius: '6px',
-                marginTop: '1rem',
-                maxHeight: '240px'
-              }}>
-                <h4>Result Preview ({result.length} rows)</h4>
-                <ResultsTable data={result} />
+              <div className="card" style={{ width: '100%', padding: '30px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', flex: 1, display: 'flex', flexDirection: 'column' }}>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h3 style={{ margin: 0, color: '#0f172a' }}>Query Results</h3>
+                  {result.status === 'success' && (
+                    <span className={`status-badge ${result.rule_status === 'PASS' ? 'pass' : 'fail'}`}>
+                      {result.rule_status === 'PASS' ? '✅ PASS' : '❌ FAIL'} ({result.data?.length || 0} anomaly rows)
+                    </span>
+                  )}
+                </div>
+
+                {result.status === 'error' ? (
+                  <div style={{ background: '#fef2f2', color: '#991b1b', padding: '20px', borderRadius: '8px', border: '1px solid #fecaca', fontFamily: 'monospace' }}>
+                    <strong>Execution Error:</strong><br /><br />
+                    {result.message}
+                  </div>
+                ) : (
+                  // *** ADDED maxHeight AND overflowY HERE TO FORCE THE VERTICAL SCROLLER ***
+                  <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                    <table className="rule-table" style={{ width: '100%', margin: 0, borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f8fafc', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <tr>
+                          {result.columns?.map((col, idx) => (
+                            <th key={idx} style={{ padding: '12px 15px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '1px solid #e2e8f0' }}>
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.data?.length === 0 ? (
+                          <tr>
+                            <td colSpan={result.columns?.length || 1} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                              Query returned 0 rows. Rule Passed!
+                            </td>
+                          </tr>
+                        ) : (
+                          result.data?.map((row, rowIndex) => (
+                            <tr key={rowIndex} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              {result.columns?.map((col, colIndex) => (
+                                <td key={colIndex} style={{ padding: '12px 15px', color: '#334155', fontSize: '0.9rem' }}>
+                                  {typeof row[col] === 'object' ? JSON.stringify(row[col]) : String(row[col])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
+
           </div>
         )}
 
