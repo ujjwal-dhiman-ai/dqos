@@ -114,14 +114,25 @@ function App() {
     dbname: 'postgres'
   });
 
+  // SCHEDULE STATE
+  const [schedules, setSchedules] = useState([])
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [scheduleData, setScheduleData] = useState({ rule_id: null, name: '', cron: '0 0 * * *' }) // Default: Daily at midnight
+
   // NEW
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+
+  const fetchSchedules = async () => {
+    try { const res = await axios.get(`${API_URL}/schedules/`); setSchedules(res.data) }
+    catch (err) { console.error(err) }
+  }
+
   useEffect(() => {
-    // Always fetch sources because we need them for the dropdown in Playground
     fetchSources()
     if (activeTab === 'rules') fetchRules()
     if (activeTab === 'history') fetchHistory()
+    if (activeTab === 'schedules') fetchSchedules() // <--- NEW
   }, [activeTab])
 
   // HELPER: Auto-generate URL when form changes
@@ -143,6 +154,36 @@ function App() {
       setNewSourceUrl(generatedUrl);
     }
   }, [dbCreds, newSourceType, connMode]);
+
+  const handleScheduleSubmit = async () => {
+    try {
+      await axios.post(`${API_URL}/schedules/`, {
+        rule_id: scheduleData.rule_id,
+        name: scheduleData.name,
+        cron_expression: scheduleData.cron
+      });
+      alert("Rule Scheduled Successfully!");
+      setShowScheduleModal(false);
+      fetchSchedules();
+    } catch (err) { alert("Failed to schedule: " + err.message); }
+  }
+
+  const deleteSchedule = async (ruleId) => {
+    if (!window.confirm("Remove this schedule?")) return;
+    try {
+      await axios.delete(`${API_URL}/schedules/${ruleId}`);
+      fetchSchedules();
+    } catch (err) { alert("Failed to delete: " + err.message); }
+  }
+
+  const toggleSchedule = async (ruleId) => {
+    try {
+      await axios.put(`${API_URL}/schedules/${ruleId}/toggle`);
+      fetchSchedules(); // Refresh to update the UI buttons
+    } catch (err) {
+      alert("Failed to toggle: " + (err.response?.data?.detail || err.message));
+    }
+  }
 
   const fetchSources = async () => {
     try { const res = await axios.get(`${API_URL}/sources/`); setSources(res.data) }
@@ -324,10 +365,91 @@ function App() {
     } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
 
-  
+
   return (
     <div className="container">
       {modalData && <DataModal data={modalData} onClose={() => setModalData(null)} />}
+
+      {/* SCHEDULE CREATION MODAL */}
+      {showScheduleModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(2px)',
+          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+        }}>
+          {/* Modal Container - Removed className="card" to prevent unwanted height stretching */}
+          <div style={{
+            width: '100%', maxWidth: '450px',
+            background: '#ffffff', borderRadius: '8px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden'
+          }}>
+
+            {/* Modal Header */}
+            <div style={{ padding: '20px 25px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: '#0f172a', fontSize: '1.15rem' }}>Schedule Rule #{scheduleData.rule_id}</h3>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#94a3b8', lineHeight: 1 }}
+                title="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '25px' }}>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155', fontSize: '0.9rem' }}>Schedule Name</label>
+                <input
+                  value={scheduleData.name}
+                  onChange={e => setScheduleData({ ...scheduleData, name: e.target.value })}
+                  placeholder="e.g. Nightly User Check"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.95rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155', fontSize: '0.9rem' }}>Frequency</label>
+                <select
+                  value={scheduleData.cron}
+                  onChange={e => setScheduleData({ ...scheduleData, cron: e.target.value })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', color: 'rgb(45, 48, 53)',border: '1px solid #cbd5e1', fontSize: '0.95rem', background: 'white' }}
+                >
+                  <option value="* * * * *">Every Minute (Testing)</option>
+                  <option value="0 * * * *">Every Hour</option>
+                  <option value="0 0 * * *">Daily at Midnight</option>
+                  <option value="0 0 * * 0">Weekly (Sunday)</option>
+                </select>
+
+                {/* Helpful subtext showing the raw cron string */}
+                <p style={{ margin: '8px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                  Cron Expression: <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>{scheduleData.cron}</code>
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '15px 25px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                className="secondary"
+                onClick={() => setShowScheduleModal(false)}
+                style={{ padding: '8px 16px', background: 'white', border: '1px solid #cbd5e1', color: '#475569', fontWeight: '600', borderRadius: '6px' }}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary"
+                onClick={handleScheduleSubmit}
+                style={{ padding: '8px 16px', fontWeight: '600', borderRadius: '6px' }}
+              >
+                Save Schedule
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       <nav className="sidebar">
         <h2>DQ OS</h2>
@@ -336,6 +458,9 @@ function App() {
         </button>
         <button onClick={() => setActiveTab('playground')} className={activeTab === 'playground' ? 'active' : ''}>
           PlayGround
+        </button>
+        <button onClick={() => { setActiveTab('schedules'); resetPlayground(); }} className={activeTab === 'schedules' ? 'active' : ''}>
+          Automations
         </button>
         <button onClick={() => { setActiveTab('rules'); resetPlayground(); }} className={activeTab === 'rules' ? 'active' : ''}>
           Saved Rules
@@ -377,7 +502,7 @@ function App() {
               </div>
 
               {/* Editor Split: Query & Params */}
-              <div style={{ display: 'flex', gap: '20px', marginBottom: '25px' }}>
+              <div style={{ display: 'flex', gap: '20px', height: '400px', marginBottom: '25px' }}>
                 <div style={{ flex: 2, display: 'flex', flexDirection: 'column' }}>
                   <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#334155' }}>SQL Query</label>
                   <textarea
@@ -488,7 +613,7 @@ function App() {
           <div className="card">
             <h3>Your Rule Library</h3>
             <table className="rule-table">
-              <thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Actions</th></tr></thead>
+              <thead><tr><th>ID</th><th>Name</th><th>Source</th><th>Actions</th><th>Set Trigger</th></tr></thead>
               <tbody>
                 {rules.map(r => (
                   <tr key={r.id}>
@@ -501,6 +626,20 @@ function App() {
                     <td style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => executeRule(r.id)} className="small-btn">Run</button>
                       <button onClick={() => editRule(r)} className="small-btn" style={{ background: '#64748b' }}>Edit</button>
+
+                    </td>
+                    <td>
+                      {/* NEW SCHEDULE BUTTON */}
+                      <button
+                        onClick={() => {
+                          setScheduleData({ rule_id: r.id, name: `${r.name}`, cron: '0 0 * * *' });
+                          setShowScheduleModal(true);
+                        }}
+                        className="small-btn"
+                        style={{ background: '#7a9e68', border: '1px solid #065b11' }}
+                      >
+                        ⏰ Schedule
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -824,6 +963,7 @@ function App() {
                     <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Time</th>
                     <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Rule</th>
                     <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Status</th>
+                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Triggered By</th> {/* NEW HEADER */}
                     <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0', textAlign: 'left', background: '#f8fafc' }}>Data</th>
                   </tr>
                 </thead>
@@ -837,6 +977,18 @@ function App() {
                           {run.status}
                         </span>
                       </td>
+                      {/* NEW TRIGGER COLUMN */}
+                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                        {run.triggered_by === 'Manual' ? (
+                          <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            👤 Manual
+                          </span>
+                        ) : (
+                          <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            ⏰ {run.triggered_by}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
                         <button className="secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => setModalData(run.result)}>
                           View Results
@@ -844,9 +996,80 @@ function App() {
                       </td>
                     </tr>
                   ))}
+                  {history.length === 0 && (
+                    <tr><td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No execution logs found.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* TAB 5: AUTOMATIONS / SCHEDULES */}
+        {activeTab === 'schedules' && (
+          <div className="card">
+            <h3>Active Triggers</h3>
+            <p style={{ color: '#64748b', marginBottom: '20px' }}>Rules that are configured to run automatically.</p>
+            <table className="rule-table">
+              <thead style={{ background: '#f8fafc' }}>
+                <tr>
+                  <th>Schedule Name</th>
+                  <th>Target Rule</th>
+                  <th>Frequency (Cron)</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedules.map(s => (
+                  <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ fontWeight: '500' }}>{s.name}</td>
+                    <td>{s.rule_name}</td>
+                    <td>
+                      <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 10px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                        {s.cron === '* * * * *' ? 'Every Minute' : s.cron === '0 * * * *' ? 'Hourly' : s.cron === '0 0 * * *' ? 'Daily' : s.cron === '0 0 * * 0' ? 'Weekly' : s.cron}
+                      </span>
+                    </td>
+
+                    {/* NEW STATUS BADGE */}
+                    <td>
+                      {s.is_active ? (
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700' }}>ACTIVE</span>
+                      ) : (
+                        <span style={{ background: '#f1f5f9', color: '#64748b', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700' }}>PAUSED</span>
+                      )}
+                    </td>
+
+                    {/* NEW DUAL ACTIONS */}
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                        <button
+                          onClick={() => toggleSchedule(s.rule_id)}
+                          className="small-btn"
+                          style={{
+                            background: s.is_active ? '#fff7ed' : '#ecfdf5',
+                            border: s.is_active ? '1px solid #fdba74' : '1px solid #6ee7b7',
+                            color: s.is_active ? '#c2410c' : '#047857'
+                          }}
+                        >
+                          {s.is_active ? '⏸ Pause' : '▶ Resume'}
+                        </button>
+                        <button
+                          onClick={() => deleteSchedule(s.rule_id)}
+                          className="small-btn"
+                          style={{ background: '#fff1f2', border: '1px solid #fecaca', color: '#e11d48' }}
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {schedules.length === 0 && (
+                  <tr><td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No active schedules.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </main>

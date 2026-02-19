@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Json
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, text, desc, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, text, desc, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 from sqlalchemy.exc import NoSuchModuleError, OperationalError, ArgumentError
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,11 +9,15 @@ from typing import Optional, Any, Dict
 import json
 from cryptography.fernet import Fernet
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from contextlib import contextmanager
 
 # Generate or load a key
 # In production, use: ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ENCRYPTION_KEY = Fernet.generate_key()
 cipher_suite = Fernet(ENCRYPTION_KEY)
+
 
 def encrypt_data(data: str) -> str:
     return cipher_suite.encrypt(data.encode()).decode()
@@ -21,6 +25,7 @@ def encrypt_data(data: str) -> str:
 
 def decrypt_data(data: str) -> str:
     return cipher_suite.decrypt(data.encode()).decode()
+
 
 # 1. Get URL from Environment, or fallback to localhost for testing
 DATABASE_URL = os.getenv(
@@ -86,7 +91,17 @@ class DQRun(Base):
     status = Column(String)
     result_json = Column(Text)
     executed_at = Column(DateTime, default=datetime.utcnow)
-    
+    triggered_by = Column(String, default="Manual")  # NEW FIELD
+
+
+class DQSchedule(Base):
+    __tablename__ = "dq_schedules"
+    id = Column(Integer, primary_key=True, index=True)
+    rule_id = Column(Integer, ForeignKey("dq_rules.id"))
+    cron_expression = Column(String)  # e.g., "0 0 * * *" for daily
+    name = Column(String)             # e.g., "Daily User Check"
+    is_active = Column(Boolean, default=True)
+
 
 # Try to create tables, but don't fail if database is unavailable
 try:
@@ -96,6 +111,10 @@ except Exception as e:
     print("Database will be initialized on first endpoint call")
 
 app = FastAPI()
+
+# --- 1. SCHEDULER SETUP ---
+scheduler = BackgroundScheduler()
+scheduler.start()
 
 origins = [
     "http://localhost:5173",
@@ -112,6 +131,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Helper to get a fresh DB session for background threads
+
+
+@contextmanager
+def get_db_session():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# The function that actually runs in the background
+
+
+# 1. Add schedule_name to the arguments
+def run_scheduled_rule(rule_id: int, schedule_name: str):
+    with get_db_session() as db:
+        # 2. Pass the schedule_name as the triggered_by parameter
+        execute_saved_rule(rule_id=rule_id, run_params={},
+                           triggered_by=schedule_name, db=db)
+        print(f"Rule {rule_id} executed via trigger: {schedule_name}.")
+
+# Load existing schedules on startup
+
+
+@app.on_event("startup")
+def load_schedules():
+    with get_db_session() as db:
+        schedules = db.query(DQSchedule).filter(
+            DQSchedule.is_active == True).all()
+        for sched in schedules:
+            scheduler.add_job(
+                run_scheduled_rule,
+                CronTrigger.from_crontab(sched.cron_expression),
+                # Add sched.name to the args list!
+                args=[sched.rule_id, sched.name],
+                id=f"rule_{sched.rule_id}",
+                replace_existing=True
+            )
+
 
 def get_db():
     db = SessionLocal()
@@ -127,6 +186,7 @@ class SourceCreate(BaseModel):
     name: str
     connection_url: str
     type: str
+
 
 class RuleCreate(BaseModel):
     name: str
@@ -149,9 +209,11 @@ class AdHocCheck(BaseModel):
     params: dict = {}
     source_id: int  # <--- REQUIRED NOW
 
+
 class ConnectionTest(BaseModel):
     connection_url: str
-    
+
+
 class CredentialSource(BaseModel):
     name: str
     db_type: str  # 'postgres', 'mysql', 'mssql', 'snowflake'
@@ -161,8 +223,91 @@ class CredentialSource(BaseModel):
     password: str
     database: str
 
-    
-    
+# --- 2. SCHEDULE ENDPOINTS ---
+
+
+class ScheduleCreate(BaseModel):
+    rule_id: int
+    name: str
+    cron_expression: str
+
+
+@app.get("/schedules/")
+def get_schedules(db: Session = Depends(get_db)):
+    # Join with DQRule to get the rule name
+    schedules = db.query(DQSchedule, DQRule.name.label(
+        "rule_name")).join(DQRule).all()
+    return [{"id": s.DQSchedule.id, "rule_id": s.DQSchedule.rule_id, "name": s.DQSchedule.name, "cron": s.DQSchedule.cron_expression, "rule_name": s.rule_name, "is_active": s.DQSchedule.is_active} for s in schedules]
+
+
+@app.post("/schedules/")
+def create_schedule(sched: ScheduleCreate, db: Session = Depends(get_db)):
+    # 1. Save to DB
+    new_schedule = DQSchedule(
+        rule_id=sched.rule_id,
+        name=sched.name,
+        cron_expression=sched.cron_expression,
+        is_active=True
+    )
+    db.add(new_schedule)
+    db.commit()
+
+    # Add to active background scheduler
+    scheduler.add_job(
+        run_scheduled_rule,
+        CronTrigger.from_crontab(sched.cron_expression),
+        # Add sched.name to the args list!
+        args=[sched.rule_id, sched.name],
+        id=f"rule_{sched.rule_id}",
+        replace_existing=True
+    )
+    return {"message": "Schedule created"}
+
+
+@app.delete("/schedules/{rule_id}")
+def delete_schedule(rule_id: int, db: Session = Depends(get_db)):
+    # 1. Remove from DB
+    db.query(DQSchedule).filter(DQSchedule.rule_id == rule_id).delete()
+    db.commit()
+
+    # 2. Remove from active scheduler
+    try:
+        scheduler.remove_job(f"rule_{rule_id}")
+    except:
+        pass  # Job might not be actively loaded
+    return {"message": "Schedule removed"}
+
+
+@app.put("/schedules/{rule_id}/toggle")
+def toggle_schedule(rule_id: int, db: Session = Depends(get_db)):
+    # 1. Find the schedule
+    sched = db.query(DQSchedule).filter(DQSchedule.rule_id == rule_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # 2. Toggle the boolean
+    sched.is_active = not sched.is_active
+    db.commit()
+
+    # 3. Update the Background Scheduler
+    if sched.is_active:
+        # Turn it back on
+        scheduler.add_job(
+            run_scheduled_rule,
+            CronTrigger.from_crontab(sched.cron_expression),
+            args=[sched.rule_id, sched.name],
+            id=f"rule_{sched.rule_id}",
+            replace_existing=True
+        )
+    else:
+        # Turn it off
+        try:
+            scheduler.remove_job(f"rule_{sched.rule_id}")
+        except:
+            pass  # Ignore if job wasn't actively in memory
+
+    return {"message": "Toggled", "is_active": sched.is_active}
+
 # --- HELPER: Dynamic Execution ---
 def execute_on_source(source_url: str, sql: str, params: dict):
     try:
@@ -185,6 +330,7 @@ def execute_on_source(source_url: str, sql: str, params: dict):
             pass
 
 # --- ENDPOINTS ---
+
 
 @app.post("/sources/credentials")
 def create_source_via_creds(src: CredentialSource, db: Session = Depends(get_db)):
@@ -219,6 +365,8 @@ def create_source_via_creds(src: CredentialSource, db: Session = Depends(get_db)
     return {"message": "Source secured and saved"}
 
 # 1. DATA SOURCES
+
+
 @app.post("/sources/")
 def create_source(source: SourceCreate, db: Session = Depends(get_db)):
     new_source = DQSource(
@@ -313,6 +461,7 @@ def test_connection(conn: ConnectionTest):
     finally:
         engine.dispose()
 
+
 @app.post("/rules/")
 def create_rule(rule: RuleCreate, db: Session = Depends(get_db)):
     new_rule = DQRule(
@@ -373,23 +522,24 @@ def run_adhoc(check: AdHocCheck, db: Session = Depends(get_db)):
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
     try:
-        rows = execute_on_source(source.connection_url, check.sql, check.params)
+        rows = execute_on_source(
+            source.connection_url, check.sql, check.params)
         return {"status": "success", "data": rows}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/run-rule/{rule_id}")
-def execute_saved_rule(rule_id: int, run_params: dict = {}, db: Session = Depends(get_db)):
+def execute_saved_rule(rule_id: int, run_params: dict = {}, triggered_by: str = "Manual", db: Session = Depends(get_db)):
     # 1. Fetch Rule
     rule = db.query(DQRule).filter(DQRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
-    
+
     if not rule.source_id:
         raise HTTPException(
             status_code=400, detail="Rule has no Data Source assigned")
-        
+
     source = db.query(DQSource).filter(DQSource.id == rule.source_id).first()
 
     # 2. Merge Parameters (Saved Defaults + Runtime Overrides)
@@ -406,7 +556,8 @@ def execute_saved_rule(rule_id: int, run_params: dict = {}, db: Session = Depend
 
     try:
         # 3. Dynamic Execution
-        output_data = execute_on_source(source.connection_url, rule.sql_query, final_params)
+        output_data = execute_on_source(
+            source.connection_url, rule.sql_query, final_params)
         status = "PASS" if len(output_data) == 0 else "FAIL"
     except Exception as e:
         status = "ERROR"
@@ -416,7 +567,8 @@ def execute_saved_rule(rule_id: int, run_params: dict = {}, db: Session = Depend
     new_run = DQRun(
         rule_id=rule.id,
         status=status,
-        result_json=json.dumps(output_data, default=str)
+        result_json=json.dumps(output_data, default=str),
+        triggered_by=triggered_by  # <--- Add this line
     )
     db.add(new_run)
     db.commit()
@@ -439,9 +591,7 @@ def get_run_history(limit: int = 50, db: Session = Depends(get_db)):
             "rule": rule_name,
             "status": run.status,
             "executed_at": run.executed_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "result": run.result_json
+            "result": run.result_json,
+            "triggered_by": run.triggered_by  # <--- Add this line
         })
     return history
-
-
-
