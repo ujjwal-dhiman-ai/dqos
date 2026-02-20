@@ -191,6 +191,24 @@ function App() {
     catch (err) { console.error(err) }
   }
 
+  const parseConnectionUrl = (url) => {
+    if (!url) return null;
+    try {
+      // Normalize dialect+driver:// to a plain dialect:// so URL() can parse it
+      const normalized = url.replace(/^([a-z]+)\+[a-z0-9]+:\/\//, '$1://');
+      const parsed = new URL(normalized);
+      return {
+        host: parsed.hostname || 'localhost',
+        port: parsed.port || '5432',
+        user: decodeURIComponent(parsed.username || ''),
+        password: decodeURIComponent(parsed.password || ''),
+        dbname: (parsed.pathname || '').replace(/^\//, '')
+      };
+    } catch (e) {
+      return null;
+    }
+  };
+
   const resetForm = () => {
     setEditingSourceId(null);
     setNewSourceName("");
@@ -729,9 +747,14 @@ function App() {
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
                                   <button className="btn btn-secondary btn-sm" onClick={() => {
-                                    setEditingSourceId(s.id); setNewSourceName(s.name);
-                                    setNewSourceUrl(s.connection_url); setNewSourceType(s.type);
-                                    setConnMode('url'); setDataHubView('create');
+                                    setEditingSourceId(s.id);
+                                    setNewSourceName(s.name);
+                                    setNewSourceUrl(s.connection_url);
+                                    setNewSourceType(s.type);
+                                    setConnMode('url');
+                                    const creds = parseConnectionUrl(s.connection_url);
+                                    if (creds) setDbCreds(creds);
+                                    setDataHubView('create');
                                   }}>&#x270F; Edit</button>
                                   <button className="btn btn-danger btn-sm" onClick={() => deleteSource(s.id)}>Delete</button>
                                 </div>

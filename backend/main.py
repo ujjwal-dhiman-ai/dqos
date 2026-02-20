@@ -308,10 +308,30 @@ def toggle_schedule(rule_id: int, db: Session = Depends(get_db)):
 
     return {"message": "Toggled", "is_active": sched.is_active}
 
+# --- HELPER: Normalize connection URL ---
+
+
+def normalize_connection_url(url: str) -> str:
+    """
+    Replaces mssql+pyodbc (requires system ODBC driver) with mssql+pymssql
+    (pure-Python, works on Linux/Render without extra system packages).
+    Strips the ?driver=... query string that pyodbc needs but pymssql rejects.
+    """
+    if url and 'mssql+pyodbc' in url:
+        url = url.replace('mssql+pyodbc', 'mssql+pymssql')
+        # Remove ?driver=... and any trailing params pyodbc added
+        if '?driver=' in url:
+            url = url.split('?driver=')[0]
+        elif '?Driver=' in url:
+            url = url.split('?Driver=')[0]
+    return url
+
+
 # --- HELPER: Dynamic Execution ---
 
 
 def execute_on_source(source_url: str, sql: str, params: dict):
+    source_url = normalize_connection_url(source_url)
     try:
         temp_engine = create_engine(source_url)
         with temp_engine.connect() as conn:
@@ -342,7 +362,7 @@ def create_source_via_creds(src: CredentialSource, db: Session = Depends(get_db)
     elif src.db_type == 'mysql':
         url = f"mysql+pymysql://{src.username}:{src.password}@{src.host}:{src.port}/{src.database}"
     elif src.db_type == 'mssql':
-        url = f"mssql+pyodbc://{src.username}:{src.password}@{src.host}/{src.database}?driver=ODBC+Driver+17+for+SQL+Server"
+        url = f"mssql+pymssql://{src.username}:{src.password}@{src.host}/{src.database}"
     else:
         raise HTTPException(
             status_code=400, detail="Unsupported DB type for credential form")
@@ -436,7 +456,7 @@ def test_connection(conn: ConnectionTest):
     Returns success or a human-readable error.
     """
     try:
-        engine = create_engine(conn.connection_url)
+        engine = create_engine(normalize_connection_url(conn.connection_url))
         with engine.connect() as connection:
             # Run a lightweight query valid in almost all SQL dialects
             connection.execute(text("SELECT 1"))
