@@ -462,7 +462,7 @@ function App() {
             </div>
           </div>
           <div className="topbar-right">
-            {activeTab === 'playground' && (
+            {/* {activeTab === 'playground' && (
               <>
                 {editingId && <button className="btn btn-secondary btn-sm" onClick={resetPlayground}>&#x2715; Cancel Edit</button>}
                 <button className="btn btn-secondary btn-sm" onClick={saveOrUpdateRule}>
@@ -472,17 +472,17 @@ function App() {
                   {pgIsRunning ? '... Running...' : '\u25b6 Run Query'}
                 </button>
               </>
-            )}
-            {activeTab === 'datahub' && dataHubView === 'list' && (
+            )} */}
+            {/* {activeTab === 'datahub' && dataHubView === 'list' && (
               <button className="btn btn-primary btn-sm" onClick={() => { setDataHubView('create'); setEditingSourceId(null); resetForm(); }}>
                 + New Connection
               </button>
-            )}
-            {activeTab === 'rules' && (
+            )} */}
+            {/* {activeTab === 'rules' && (
               <button className="btn btn-primary btn-sm" onClick={() => { resetPlayground(); setActiveTab('playground'); }}>
                 + New Rule
               </button>
-            )}
+            )} */}
             {activeTab === 'history' && (
               <button className="btn btn-secondary btn-sm" onClick={fetchHistory}>&#x21BB; Refresh</button>
             )}

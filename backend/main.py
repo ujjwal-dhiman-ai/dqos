@@ -309,6 +309,8 @@ def toggle_schedule(rule_id: int, db: Session = Depends(get_db)):
     return {"message": "Toggled", "is_active": sched.is_active}
 
 # --- HELPER: Dynamic Execution ---
+
+
 def execute_on_source(source_url: str, sql: str, params: dict):
     try:
         temp_engine = create_engine(source_url)
@@ -433,18 +435,24 @@ def test_connection(conn: ConnectionTest):
     Tries to connect to the DB without saving.
     Returns success or a human-readable error.
     """
-    engine = create_engine(conn.connection_url)
     try:
+        engine = create_engine(conn.connection_url)
         with engine.connect() as connection:
             # Run a lightweight query valid in almost all SQL dialects
             connection.execute(text("SELECT 1"))
         return {"status": "success", "message": "Connection Successful!"}
 
+    except ValueError as e:
+        # Catches empty/invalid port (e.g. port="") or other URL component issues
+        return {
+            "status": "error",
+            "message": f"Invalid connection URL — check that all fields (host, port, database) are filled in correctly. Detail: {str(e)}"
+        }
     except NoSuchModuleError as e:
         # This catches missing drivers (e.g., missing pyodbc or pymysql)
         return {
             "status": "error",
-            "message": f"Missing Driver Error: {str(e)}. Try installing the driver (e.g., 'pip install pyodbc')."
+            "message": f"Missing Driver: {str(e)}. Install the required driver (e.g. 'pip install pyodbc' for SQL Server)."
         }
     except ArgumentError:
         return {
@@ -454,7 +462,7 @@ def test_connection(conn: ConnectionTest):
     except OperationalError as e:
         return {
             "status": "error",
-            "message": f"Connection Failed: Could not reach server. Check host/password. Details: {str(e.orig)}"
+            "message": f"Connection Failed: Could not reach the server. Check host/port/credentials. Details: {str(e.orig)}"
         }
     except Exception as e:
         return {"status": "error", "message": f"Unexpected Error: {str(e)}"}
