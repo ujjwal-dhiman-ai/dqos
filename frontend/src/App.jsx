@@ -102,6 +102,8 @@ function App() {
     password: '',
     dbname: 'postgres'
   });
+  const [sourceErrors, setSourceErrors] = useState({})
+  const [playgroundErrors, setPlaygroundErrors] = useState({})
 
   // SCHEDULE STATE
   const [schedules, setSchedules] = useState([])
@@ -216,6 +218,7 @@ function App() {
     setNewSourceType("");
     setConnMode('form'); // Reset to default mode
     setDbCreds({ host: 'localhost', port: '5432', user: 'postgres', password: '', dbname: 'postgres' });
+    setSourceErrors({});
   }
 
   const resetPlayground = () => {
@@ -225,15 +228,79 @@ function App() {
     setParams("{}");
     setSelectedSourceId("");
     setResult(null);
+    setPlaygroundErrors({});
+  }
+
+  const validateSourceForm = () => {
+    const errors = {}
+    const trimmedName = newSourceName.trim()
+    const trimmedType = newSourceType.trim()
+    const trimmedUrl = newSourceUrl.trim()
+
+    if (!trimmedName) errors.name = 'Source name is required.'
+    if (!trimmedType) errors.type = 'Database type is required.'
+    if (!trimmedUrl) errors.connection_url = 'Connection string is required.'
+
+    if (connMode === 'form') {
+      const { host, port, user, password, dbname } = dbCreds
+      if (!host.trim()) errors.host = 'Host is required.'
+      if (!port.trim()) errors.port = 'Port is required.'
+      else if (!/^\d+$/.test(port.trim()) || Number(port.trim()) <= 0) errors.port = 'Port must be a positive number.'
+      if (!user.trim()) errors.user = 'Username is required.'
+      if (!password.trim()) errors.password = 'Password is required.'
+      if (!dbname.trim()) errors.dbname = 'Database name is required.'
+    }
+
+    setSourceErrors(errors)
+    return {
+      isValid: Object.keys(errors).length === 0,
+      trimmedName,
+      trimmedType,
+      trimmedUrl
+    }
+  }
+
+  const validatePlayground = ({ requireRuleName = false } = {}) => {
+    const errors = {}
+
+    let sourceId = Number(selectedSourceId)
+    if (!selectedSourceId || !Number.isInteger(sourceId) || sourceId <= 0) {
+      errors.source_id = 'Please select a valid Data Source.'
+      sourceId = null
+    }
+
+    const trimmedSql = sql.trim()
+    if (!trimmedSql) errors.sql = 'SQL Query is required.'
+
+    if (requireRuleName && !ruleName.trim()) errors.rule_name = 'Rule name is required.'
+
+    let parsedParams = {}
+    try {
+      parsedParams = params.trim() ? JSON.parse(params) : {}
+      if (typeof parsedParams !== 'object' || parsedParams === null || Array.isArray(parsedParams)) {
+        errors.params = 'Parameters must be a valid JSON object.'
+      }
+    } catch {
+      errors.params = 'Invalid JSON format in Parameters.'
+    }
+
+    setPlaygroundErrors(errors)
+    return {
+      isValid: Object.keys(errors).length === 0,
+      sourceId,
+      trimmedSql,
+      parsedParams
+    }
   }
 
   const saveOrUpdateSource = async () => {
-    if (!newSourceName || !newSourceUrl) return alert("Please fill in all fields");
+    const { isValid, trimmedName, trimmedType, trimmedUrl } = validateSourceForm()
+    if (!isValid) return
 
     const payload = {
-      name: newSourceName,
-      connection_url: newSourceUrl,
-      type: newSourceType || 'postgres'
+      name: trimmedName,
+      connection_url: trimmedUrl,
+      type: trimmedType
     };
 
     try {
@@ -254,7 +321,7 @@ function App() {
       setDataHubView('list');
 
     } catch (err) {
-      alert("Error: " + (err.response?.data?.detail || err.message));
+      setSourceErrors(prev => ({ ...prev, form: err.response?.data?.detail || err.message }))
     }
   }
 
@@ -270,15 +337,8 @@ function App() {
   }
 
   const runAdHoc = async () => {
-    if (!selectedSourceId) return alert("Please select a Data Source first!");
-    if (!sql.trim()) return alert("SQL Query cannot be empty.");
-
-    let parsedParams = {};
-    try {
-      parsedParams = params.trim() ? JSON.parse(params) : {};
-    } catch (e) {
-      return alert("Invalid JSON format in the Params field.");
-    }
+    const { isValid, sourceId, trimmedSql, parsedParams } = validatePlayground()
+    if (!isValid) return
 
     setPgIsRunning(true);
     setResult(null); // Clear previous results
@@ -286,8 +346,8 @@ function App() {
     try {
       // 1. MATCH YOUR BACKEND ENDPOINT EXACTLY
       const res = await axios.post(`${API_URL}/run-adhoc`, {
-        source_id: parseInt(selectedSourceId),
-        sql: sql,             // Changed to match your AdHocCheck model
+        source_id: sourceId,
+        sql: trimmedSql,
         params: parsedParams
       });
 
@@ -322,19 +382,16 @@ function App() {
   }
 
   const saveOrUpdateRule = async () => {
-    if (!ruleName) return alert("Please name your rule!")
-    if (!selectedSourceId) return alert("Data Source is required!")
-    try {
-      // Parse params from the text box
-      let parsedParams = {}
-      try { parsedParams = JSON.parse(params) } catch (e) { return alert("Invalid JSON in Parameters") }
+    const { isValid, sourceId, trimmedSql, parsedParams } = validatePlayground({ requireRuleName: true })
+    if (!isValid) return
 
+    try {
       // Send params in payload
       const payload = {
-        name: ruleName,
-        sql: sql,
-        params: parsedParams, // <--- SENDING PARAMS NOW
-        source_id: selectedSourceId // <--- SENDING SOURCE ID NOW
+        name: ruleName.trim(),
+        sql: trimmedSql,
+        params: parsedParams,
+        source_id: sourceId
       }
 
       if (editingId) {
@@ -347,6 +404,7 @@ function App() {
 
       setEditingId(null)
       setRuleName("")
+      setPlaygroundErrors({})
       fetchRules()
       if (activeTab === 'playground') setActiveTab('rules')
     } catch (err) {
@@ -557,12 +615,16 @@ function App() {
                   {/* Source selector */}
                   <div className="form-group">
                     <label className="form-label">Target Data Source <span className="required">*</span></label>
-                    <select value={selectedSourceId} onChange={e => setSelectedSourceId(e.target.value)}>
+                    <select value={selectedSourceId} onChange={e => {
+                      setSelectedSourceId(e.target.value)
+                      setPlaygroundErrors(prev => ({ ...prev, source_id: undefined }))
+                    }}>
                       <option value="">— Select a database —</option>
                       {sources.map(s => (
                         <option key={s.id} value={s.id}>{s.name} ({(s.type || 'DB').toUpperCase()})</option>
                       ))}
                     </select>
+                    {playgroundErrors.source_id && <div className="field-error">{playgroundErrors.source_id}</div>}
                   </div>
 
                   {/* Editor split */}
@@ -571,21 +633,29 @@ function App() {
                       <label className="form-label">SQL Query</label>
                       <textarea
                         value={sql}
-                        onChange={e => setSql(e.target.value)}
+                        onChange={e => {
+                          setSql(e.target.value)
+                          setPlaygroundErrors(prev => ({ ...prev, sql: undefined }))
+                        }}
                         className="code-input"
                         style={{ minHeight: 240 }}
                         spellCheck={false}
                       />
+                      {playgroundErrors.sql && <div className="field-error">{playgroundErrors.sql}</div>}
                     </div>
                     <div className="form-group">
                       <label className="form-label">Parameters (JSON)</label>
                       <textarea
                         value={params}
-                        onChange={e => setParams(e.target.value)}
+                        onChange={e => {
+                          setParams(e.target.value)
+                          setPlaygroundErrors(prev => ({ ...prev, params: undefined }))
+                        }}
                         className="code-input"
                         style={{ minHeight: 240 }}
                         spellCheck={false}
                       />
+                      {playgroundErrors.params && <div className="field-error">{playgroundErrors.params}</div>}
                     </div>
                   </div>
 
@@ -596,9 +666,13 @@ function App() {
                       <input
                         placeholder="e.g. Check Null Emails"
                         value={ruleName}
-                        onChange={e => setRuleName(e.target.value)}
+                        onChange={e => {
+                          setRuleName(e.target.value)
+                          setPlaygroundErrors(prev => ({ ...prev, rule_name: undefined }))
+                        }}
                         style={{ maxWidth: 380 }}
                       />
+                      {playgroundErrors.rule_name && <div className="field-error">{playgroundErrors.rule_name}</div>}
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', paddingTop: 20, flexShrink: 0 }}>
                       {editingId && <button className="btn btn-secondary btn-sm" onClick={resetPlayground}>&#x2715; Cancel Edit</button>}
@@ -684,11 +758,11 @@ function App() {
                   />
                 ) : (
                   <table className="rule-table">
-                    <thead><tr><th>#</th><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
                     <tbody>
                       {rules.map(r => (
                         <tr key={r.id}>
-                          <td className="text-muted text-xs font-mono">{r.id}</td>
+                          {/* <td className="text-muted text-xs font-mono">{r.id}</td> */}
                           <td className="strong">{r.name}</td>
                           <td><span className="type-pill">{sources.find(s => s.id === r.source_id)?.name || 'Unknown'}</span></td>
                           <td>
@@ -781,11 +855,18 @@ function App() {
                     <div className="form-grid-2">
                       <div className="form-group">
                         <label className="form-label">Friendly Name <span className="required">*</span></label>
-                        <input placeholder="e.g. Production — Snowflake" value={newSourceName} onChange={e => setNewSourceName(e.target.value)} />
+                        <input required placeholder="e.g. Production — Snowflake" value={newSourceName} onChange={e => {
+                          setNewSourceName(e.target.value)
+                          setSourceErrors(prev => ({ ...prev, name: undefined, form: undefined }))
+                        }} />
+                        {sourceErrors.name && <div className="field-error">{sourceErrors.name}</div>}
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Database Type</label>
-                        <select value={newSourceType} onChange={e => setNewSourceType(e.target.value)}>
+                        <label className="form-label">Database Type <span className="required">*</span></label>
+                        <select required value={newSourceType} onChange={e => {
+                          setNewSourceType(e.target.value)
+                          setSourceErrors(prev => ({ ...prev, type: undefined, form: undefined }))
+                        }}>
                           <option value="">— Select type —</option>
                           <option value="postgres">PostgreSQL</option>
                           <option value="mysql">MySQL</option>
@@ -793,6 +874,7 @@ function App() {
                           <option value="snowflake">Snowflake</option>
                           <option value="oracle">Oracle</option>
                         </select>
+                        {sourceErrors.type && <div className="field-error">{sourceErrors.type}</div>}
                       </div>
                     </div>
 
@@ -810,13 +892,21 @@ function App() {
                       <div className="form-grid-2">
                         {[['Host / Server', 'host', 'localhost'], ['Port', 'port', '5432'], ['Username', 'user', 'user'], ['Password', 'password', '']].map(([label, key, ph]) => (
                           <div className="form-group" key={key}>
-                            <label className="form-label">{label}</label>
-                            <input type={key === 'password' ? 'password' : 'text'} placeholder={ph} value={dbCreds[key]} onChange={e => setDbCreds({ ...dbCreds, [key]: e.target.value })} />
+                            <label className="form-label">{label} <span className="required">*</span></label>
+                            <input required type={key === 'password' ? 'password' : 'text'} placeholder={ph} value={dbCreds[key]} onChange={e => {
+                              setDbCreds({ ...dbCreds, [key]: e.target.value })
+                              setSourceErrors(prev => ({ ...prev, [key]: undefined, form: undefined }))
+                            }} />
+                            {sourceErrors[key] && <div className="field-error">{sourceErrors[key]}</div>}
                           </div>
                         ))}
                         <div className="form-group col-span-2">
-                          <label className="form-label">Database Name</label>
-                          <input placeholder="my_database" value={dbCreds.dbname} onChange={e => setDbCreds({ ...dbCreds, dbname: e.target.value })} />
+                          <label className="form-label">Database Name <span className="required">*</span></label>
+                          <input required placeholder="my_database" value={dbCreds.dbname} onChange={e => {
+                            setDbCreds({ ...dbCreds, dbname: e.target.value })
+                            setSourceErrors(prev => ({ ...prev, dbname: undefined, form: undefined }))
+                          }} />
+                          {sourceErrors.dbname && <div className="field-error">{sourceErrors.dbname}</div>}
                         </div>
                       </div>
                     )}
@@ -824,17 +914,23 @@ function App() {
                     {/* Connection string */}
                     <div className="form-group">
                       <label className="form-label">
-                        Connection String {connMode === 'form' && <span style={{ color: 'var(--accent)', fontWeight: 500 }}>(auto-generated)</span>}
+                        Connection String <span className="required">*</span> {connMode === 'form' && <span style={{ color: 'var(--accent)', fontWeight: 500 }}>(auto-generated)</span>}
                       </label>
                       <input
+                        required
                         placeholder="dialect+driver://user:pass@host/db"
                         value={newSourceUrl}
                         readOnly={connMode === 'form'}
-                        onChange={e => setNewSourceUrl(e.target.value)}
+                        onChange={e => {
+                          setNewSourceUrl(e.target.value)
+                          setSourceErrors(prev => ({ ...prev, connection_url: undefined, form: undefined }))
+                        }}
                         className="font-mono"
                         style={{ opacity: connMode === 'form' ? 0.7 : 1 }}
                       />
+                      {sourceErrors.connection_url && <div className="field-error">{sourceErrors.connection_url}</div>}
                     </div>
+                    {sourceErrors.form && <div className="field-error">{sourceErrors.form}</div>}
 
                     {/* Actions */}
                     <div style={{ display: 'flex', gap: 11, paddingTop: 6, borderTop: '1px solid var(--border-subtle)' }}>
