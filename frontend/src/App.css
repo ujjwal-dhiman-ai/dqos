@@ -373,6 +373,83 @@ button {
   color: var(--text-primary);
 }
 
+.rule-name-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.rule-name-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.row-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.row-menu-trigger {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.row-menu-trigger:hover {
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+}
+
+.row-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 120px;
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  z-index: 20;
+}
+
+.row-menu-item {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.row-menu-item:hover {
+  background: var(--bg-card-alt);
+}
+
+.row-menu-item.danger {
+  color: var(--fail-text);
+}
+
 /* Stat Grid */
 .stat-grid {
   display: grid;
@@ -897,6 +974,30 @@ select {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.modal-section {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.modal-section strong {
+  display: block;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.code-block {
+  background: var(--bg-card-alt);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  font-size: 0.78rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .modal-footer {
   padding: 14px 22px;
