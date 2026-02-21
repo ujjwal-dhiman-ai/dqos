@@ -304,16 +304,20 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
 
-    # Clean up schedules
-    db.query(DQSchedule).filter(DQSchedule.rule_id == rule_id).delete()
     try:
-        scheduler.remove_job(f"rule_{rule_id}")
-    except:
-        pass
+        db.query(DQSchedule).filter(DQSchedule.rule_id == rule_id).delete()
+        try:
+            scheduler.remove_job(f"rule_{rule_id}")
+        except:
+            pass
 
-    db.delete(rule)
-    db.commit()
-    return {"message": "Rule deleted"}
+        db.delete(rule)
+        db.commit()
+        return {"message": "Rule deleted"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Error deleting rule: {str(e)}")
 
 
 @app.get("/rules/")

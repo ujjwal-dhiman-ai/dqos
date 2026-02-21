@@ -378,7 +378,9 @@ function App() {
     if (!window.confirm("Are you sure you want to delete this rule?")) return
     try {
       await axios.delete(`${API_URL}/rules/${id}`)
-      setRules(rules.filter(r => r.id !== id))
+      setRules(prev => prev.filter(r => r.id !== id))
+      if (editingId === id) resetPlayground()
+      fetchRules()
     } catch (err) {
       alert("Error deleting rule: " + (err.response?.data?.detail || err.message))
     }
@@ -683,8 +685,7 @@ function App() {
                 ) : (
                   <table className="rule-table">
                     <thead><tr><th>#</th><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
-                    <tbody>  <button className="btn btn-danger btn-sm" onClick={() => deleteRule(r.id)}>Delete</button>
-                            
+                    <tbody>
                       {rules.map(r => (
                         <tr key={r.id}>
                           <td className="text-muted text-xs font-mono">{r.id}</td>
@@ -694,6 +695,7 @@ function App() {
                             <div style={{ display: 'flex', gap: 7 }}>
                               <button className="btn btn-primary btn-sm" onClick={() => executeRule(r.id)}>&#x25B6; Run</button>
                               <button className="btn btn-secondary btn-sm" onClick={() => editRule(r)}>&#x270F; Edit</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => deleteRule(r.id)}>Delete</button>
                             </div>
                           </td>
                           <td>
