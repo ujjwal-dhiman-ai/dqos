@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -47,6 +47,49 @@ const ResultsTable = ({ data }) => {
   )
 }
 
+// --- Rule Detail Modal ---
+const RuleDetailModal = ({ rule, sourceName, onClose }) => {
+  if (!rule) return null
+  const params = typeof rule.params === 'object' ? JSON.stringify(rule.params, null, 2) : rule.params || '{}'
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-header">
+          <span className="modal-title">Rule Details</span>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}>×</button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+          <div className="modal-section">
+            <strong>Name:</strong>
+            <p>{rule.name}</p>
+          </div>
+          <div className="modal-section">
+            <strong>Data Source:</strong>
+            <p>{sourceName}</p>
+          </div>
+          {rule.description && (
+            <div className="modal-section">
+              <strong>Description:</strong>
+              <p>{rule.description}</p>
+            </div>
+          )}
+          <div className="modal-section">
+            <strong>SQL:</strong>
+            <pre className="code-block" style={{ whiteSpace: 'pre-wrap' }}>{rule.sql_query}</pre>
+          </div>
+          <div className="modal-section">
+            <strong>Params:</strong>
+            <pre className="code-block" style={{ whiteSpace: 'pre-wrap' }}>{params}</pre>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- History Results Modal ---
 const DataModal = ({ data, onClose }) => {
   if (!data) return null
@@ -83,6 +126,9 @@ function App() {
   const [ruleSearch, setRuleSearch] = useState("")
   const [ruleSourceFilter, setRuleSourceFilter] = useState("all")
   const [ruleSort, setRuleSort] = useState("name_asc")
+  const [ruleDetail, setRuleDetail] = useState(null)
+  const [openRowMenu, setOpenRowMenu] = useState(null)
+  const rowMenuRef = useRef(null)
 
 
   // HISTORY STATE
@@ -255,6 +301,21 @@ function App() {
   useEffect(() => {
     if (activeTab === 'history') fetchHistory(1)
   }, [historySearch, historyStatusFilter, historyTriggeredBy, historySort])
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (rowMenuRef.current && !rowMenuRef.current.contains(event.target)) {
+        setOpenRowMenu(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [])
+
+  const toggleRowMenu = (menuKey) => {
+    setOpenRowMenu(prev => (prev === menuKey ? null : menuKey))
+  }
 
   const filteredSortedRules = useMemo(() => {
     const search = ruleSearch.trim().toLowerCase()
@@ -581,6 +642,11 @@ function App() {
     <div className={`container${darkMode ? ' dark' : ''}`}>
 
       {/* ”—€ History Results Modal ”—€ */}
+      {ruleDetail && <RuleDetailModal
+        rule={ruleDetail}
+        sourceName={sources.find(s => s.id === ruleDetail.source_id)?.name || 'Unknown source'}
+        onClose={() => setRuleDetail(null)}
+      />}
       {modalData && <DataModal data={modalData} onClose={() => setModalData(null)} />}
 
       {/* ”—€ Schedule Creation Modal ”—€ */}
@@ -917,25 +983,47 @@ function App() {
                   />
                 ) : (
                   <table className="rule-table">
-                    <thead><tr><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Data Source</th><th>Run</th><th>Schedule</th><th style={{ textAlign: 'right' }}>More</th></tr></thead>
                     <tbody>
                       {filteredSortedRules.map(r => (
                         <tr key={r.id}>
                           {/* <td className="text-muted text-xs font-mono">{r.id}</td> */}
-                          <td className="strong">{r.name}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="rule-name-link"
+                              onClick={() => setRuleDetail(r)}
+                            >
+                              {r.name}
+                            </button>
+                          </td>
                           <td><span className="type-pill">{sources.find(s => s.id === r.source_id)?.name || 'Unknown'}</span></td>
                           <td>
-                            <div style={{ display: 'flex', gap: 7 }}>
-                              <button className="btn btn-primary btn-sm" onClick={() => executeRule(r.id)}>&#x25B6; Run</button>
-                              <button className="btn btn-secondary btn-sm" onClick={() => editRule(r)}>&#x270F; Edit</button>
-                              <button className="btn btn-danger btn-sm" onClick={() => deleteRule(r.id)}>Delete</button>
-                            </div>
+                            <button className="btn btn-primary btn-sm" onClick={() => executeRule(r.id)}>&#x25B6; Run</button>
                           </td>
                           <td>
                             <button
                               className="btn btn-success btn-sm"
                               onClick={() => { setScheduleData({ rule_id: r.id, name: r.name, cron: '0 0 * * *' }); setShowScheduleModal(true); }}
                             >&#x23F1; Schedule</button>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="row-menu" ref={openRowMenu === `rules-${r.id}` ? rowMenuRef : null}>
+                              <button
+                                type="button"
+                                className="row-menu-trigger"
+                                aria-label="More actions"
+                                onClick={() => toggleRowMenu(`rules-${r.id}`)}
+                              >
+                                ⋯
+                              </button>
+                              {openRowMenu === `rules-${r.id}` && (
+                                <div className="row-menu-popover" style={{ right: 0, left: 'auto' }}>
+                                  <button className="row-menu-item" onClick={() => { editRule(r); setOpenRowMenu(null) }}>Edit</button>
+                                  <button className="row-menu-item danger" onClick={() => { deleteRule(r.id); setOpenRowMenu(null) }}>Delete</button>
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -969,25 +1057,38 @@ function App() {
                       />
                     ) : (
                       <table className="rule-table">
-                        <thead><tr><th>Name</th><th>Type</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+                        <thead><tr><th>Name</th><th>Type</th><th style={{ textAlign: 'right' }}>More</th></tr></thead>
                         <tbody>
                           {sources.map(s => (
                             <tr key={s.id}>
                               <td className="strong">{s.name}</td>
                               <td><span className="type-pill">{s.type || 'DB'}</span></td>
                               <td style={{ textAlign: 'right' }}>
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
-                                  <button className="btn btn-secondary btn-sm" onClick={() => {
-                                    setEditingSourceId(s.id);
-                                    setNewSourceName(s.name);
-                                    setNewSourceUrl(s.connection_url);
-                                    setNewSourceType(s.type);
-                                    setConnMode('url');
-                                    const creds = parseConnectionUrl(s.connection_url);
-                                    if (creds) setDbCreds(creds);
-                                    setDataHubView('create');
-                                  }}>&#x270F; Edit</button>
-                                  <button className="btn btn-danger btn-sm" onClick={() => deleteSource(s.id)}>Delete</button>
+                                <div className="row-menu" ref={openRowMenu === `datahub-${s.id}` ? rowMenuRef : null}>
+                                  <button
+                                    type="button"
+                                    className="row-menu-trigger"
+                                    aria-label="More actions"
+                                    onClick={() => toggleRowMenu(`datahub-${s.id}`)}
+                                  >
+                                    ⋯
+                                  </button>
+                                  {openRowMenu === `datahub-${s.id}` && (
+                                    <div className="row-menu-popover" style={{ right: 0, left: 'auto' }}>
+                                      <button className="row-menu-item" onClick={() => {
+                                        setEditingSourceId(s.id);
+                                        setNewSourceName(s.name);
+                                        setNewSourceUrl(s.connection_url);
+                                        setNewSourceType(s.type);
+                                        setConnMode('url');
+                                        const creds = parseConnectionUrl(s.connection_url);
+                                        if (creds) setDbCreds(creds);
+                                        setDataHubView('create');
+                                        setOpenRowMenu(null)
+                                      }}>Edit</button>
+                                      <button className="row-menu-item danger" onClick={() => { deleteSource(s.id); setOpenRowMenu(null) }}>Delete</button>
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -1251,7 +1352,7 @@ function App() {
                   />
                 ) : (
                   <table className="rule-table">
-                    <thead><tr><th>Schedule Name</th><th>Target Rule</th><th>Frequency</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+                    <thead><tr><th>Schedule Name</th><th>Target Rule</th><th>Frequency</th><th>Status</th><th style={{ textAlign: 'right' }}>Run</th><th style={{ textAlign: 'right' }}>More</th></tr></thead>
                     <tbody>
                       {filteredSortedSchedules.map(s => (
                         <tr key={s.id}>
@@ -1264,12 +1365,26 @@ function App() {
                           </td>
                           <td>{s.is_active ? <span className="badge badge-green">Active</span> : <span className="badge badge-gray">Paused</span>}</td>
                           <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 7 }}>
+                            <button
+                              className={`btn btn-sm ${s.is_active ? 'btn-danger' : 'btn-success'}`}
+                              onClick={() => toggleSchedule(s.rule_id)}
+                            >{s.is_active ? '⏸ Pause' : '▶ Resume'}</button>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="row-menu" ref={openRowMenu === `schedules-${s.id}` ? rowMenuRef : null}>
                               <button
-                                className={`btn btn-sm ${s.is_active ? 'btn-danger' : 'btn-success'}`}
-                                onClick={() => toggleSchedule(s.rule_id)}
-                              >{s.is_active ? '⏸ Pause' : '▶ Resume'}</button>
-                              <button className="btn btn-danger btn-sm" onClick={() => deleteSchedule(s.rule_id)}>Delete</button>
+                                type="button"
+                                className="row-menu-trigger"
+                                aria-label="More actions"
+                                onClick={() => toggleRowMenu(`schedules-${s.id}`)}
+                              >
+                                ⋯
+                              </button>
+                              {openRowMenu === `schedules-${s.id}` && (
+                                <div className="row-menu-popover" style={{ right: 0, left: 'auto' }}>
+                                  <button className="row-menu-item danger" onClick={() => { deleteSchedule(s.rule_id); setOpenRowMenu(null) }}>Delete</button>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
