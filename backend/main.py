@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, text, desc, asc, or_
+from sqlalchemy import create_engine, text, desc, asc, or_, func
 from sqlalchemy.exc import NoSuchModuleError, OperationalError, ArgumentError
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -355,6 +355,20 @@ def execute_saved_rule(rule_id: int, run_params: dict = {}, triggered_by: str = 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/history/stats")
+def get_history_stats(db: Session = Depends(get_db)):
+    total_runs = db.query(DQRun).count()
+    pass_runs = db.query(DQRun).filter(func.upper(
+        DQRun.status).in_(["PASS", "SUCCESS"])).count()
+    fail_runs = db.query(DQRun).filter(func.upper(
+        DQRun.status).in_(["FAIL", "ERROR"])).count()
+    return {
+        "total": total_runs,
+        "pass": pass_runs,
+        "fail": fail_runs
+    }
+
+
 @app.get("/history/")
 def get_run_history(
     page: int = Query(1, ge=1),
@@ -386,7 +400,7 @@ def get_run_history(
         )
 
     if status != "ALL":
-        base_query = base_query.filter(DQRun.status == status)
+        base_query = base_query.filter(func.upper(DQRun.status) == status)
 
     if triggered_by:
         base_query = base_query.filter(

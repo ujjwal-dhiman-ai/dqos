@@ -92,6 +92,7 @@ function App() {
   const [historyPageSize] = useState(50)
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historyTotalPages, setHistoryTotalPages] = useState(1)
+  const [historyStats, setHistoryStats] = useState({ total: 0, pass: 0, fail: 0 })
   const [historySearch, setHistorySearch] = useState("")
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all")
   const [historyTriggeredBy, setHistoryTriggeredBy] = useState("")
@@ -137,6 +138,10 @@ function App() {
 
   useEffect(() => {
     fetchSources()
+    if (activeTab === 'playground') {
+      fetchRules()
+      fetchHistoryStats()
+    }
     if (activeTab === 'rules') fetchRules()
     if (activeTab === 'history') fetchHistory(1)
     if (activeTab === 'schedules') fetchSchedules() // <--- NEW
@@ -232,6 +237,19 @@ function App() {
       }
     }
     catch (err) { console.error(err) }
+  }
+
+  const fetchHistoryStats = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/history/stats`)
+      setHistoryStats({
+        total: res.data?.total || 0,
+        pass: res.data?.pass || 0,
+        fail: res.data?.fail || 0
+      })
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   useEffect(() => {
@@ -541,6 +559,7 @@ function App() {
     try {
       const res = await axios.post(`${API_URL}/run-rule/${id}`, {})
       alert(`Status: ${res.data.status}\nRows: ${res.data.data.length}`)
+      fetchHistoryStats()
       if (activeTab === 'history') fetchHistory()
     } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
@@ -703,7 +722,7 @@ function App() {
                     <span className="stat-label">Passed (all-time)</span>
                     <div className="stat-icon green">✓</div>
                   </div>
-                  <div className="stat-value">{history.filter(h => h.status === 'PASS').length}</div>
+                  <div className="stat-value">{historyStats.pass}</div>
                   <div className="stat-sub">Successful checks</div>
                 </div>
                 <div className="stat-card">
@@ -711,7 +730,7 @@ function App() {
                     <span className="stat-label">Failed (all-time)</span>
                     <div className="stat-icon red">✗</div>
                   </div>
-                  <div className="stat-value">{history.filter(h => h.status === 'FAIL').length}</div>
+                  <div className="stat-value">{historyStats.fail}</div>
                   <div className="stat-sub">Anomalies detected</div>
                 </div>
               </div>
