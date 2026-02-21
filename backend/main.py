@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, text, desc
+from sqlalchemy import create_engine, text, desc, asc, or_
 from sqlalchemy.exc import NoSuchModuleError, OperationalError, ArgumentError
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -356,21 +356,77 @@ def execute_saved_rule(rule_id: int, run_params: dict = {}, triggered_by: str = 
 
 
 @app.get("/history/")
-def get_run_history(limit: int = 50, db: Session = Depends(get_db)):
-    runs = db.query(DQRun, DQRule.name)\
-        .join(DQRule, DQRun.rule_id == DQRule.id)\
-        .order_by(desc(DQRun.executed_at))\
-        .limit(limit)\
+def get_run_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    search: str = Query(""),
+    status: str = Query("all"),
+    triggered_by: str = Query(""),
+    sort_by: str = Query("executed_at"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db)
+):
+    base_query = db.query(DQRun, DQRule.name.label("rule_name"))\
+        .outerjoin(DQRule, DQRun.rule_id == DQRule.id)
+
+    search = (search or "").strip()
+    status = (status or "all").strip().upper()
+    triggered_by = (triggered_by or "").strip()
+    sort_by = (sort_by or "executed_at").strip().lower()
+    sort_order = (sort_order or "desc").strip().lower()
+
+    if search:
+        pattern = f"%{search}%"
+        base_query = base_query.filter(
+            or_(
+                DQRule.name.ilike(pattern),
+                DQRun.status.ilike(pattern),
+                DQRun.triggered_by.ilike(pattern)
+            )
+        )
+
+    if status != "ALL":
+        base_query = base_query.filter(DQRun.status == status)
+
+    if triggered_by:
+        base_query = base_query.filter(
+            DQRun.triggered_by.ilike(f"%{triggered_by}%"))
+
+    sort_map = {
+        "executed_at": DQRun.executed_at,
+        "status": DQRun.status,
+        "rule": DQRule.name,
+        "triggered_by": DQRun.triggered_by
+    }
+    sort_column = sort_map.get(sort_by, DQRun.executed_at)
+    order_clause = asc(
+        sort_column) if sort_order == "asc" else desc(sort_column)
+
+    total = base_query.count()
+    offset = (page - 1) * page_size
+
+    runs = base_query\
+        .order_by(order_clause)\
+        .offset(offset)\
+        .limit(page_size)\
         .all()
 
     history = []
     for run, rule_name in runs:
         history.append({
             "id": run.id,
-            "rule": rule_name,
+            "rule": rule_name or f"Deleted Rule #{run.rule_id}",
             "status": run.status,
             "executed_at": run.executed_at.strftime("%Y-%m-%d %H:%M:%S"),
             "result": run.result_json,
-            "triggered_by": run.triggered_by  # <--- Add this line
+            "triggered_by": run.triggered_by
         })
-    return history
+
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    return {
+        "items": history,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages
+    }

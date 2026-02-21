@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -80,11 +80,22 @@ function App() {
   const [rules, setRules] = useState([])
   const [ruleName, setRuleName] = useState("")
   const [editingId, setEditingId] = useState(null) // Track if we are editing
+  const [ruleSearch, setRuleSearch] = useState("")
+  const [ruleSourceFilter, setRuleSourceFilter] = useState("all")
+  const [ruleSort, setRuleSort] = useState("name_asc")
 
 
   // HISTORY STATE
   const [history, setHistory] = useState([])
   const [modalData, setModalData] = useState(null) // For the popup
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize] = useState(50)
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyTotalPages, setHistoryTotalPages] = useState(1)
+  const [historySearch, setHistorySearch] = useState("")
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all")
+  const [historyTriggeredBy, setHistoryTriggeredBy] = useState("")
+  const [historySort, setHistorySort] = useState("executed_at_desc")
 
   // DATA HUB FORM STATE
   const [sources, setSources] = useState([])
@@ -109,6 +120,9 @@ function App() {
   const [schedules, setSchedules] = useState([])
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [scheduleData, setScheduleData] = useState({ rule_id: null, name: '', cron: '0 0 * * *' }) // Default: Daily at midnight
+  const [scheduleSearch, setScheduleSearch] = useState("")
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState("all")
+  const [scheduleSort, setScheduleSort] = useState("name_asc")
 
   // DARK MODE
   const [darkMode, setDarkMode] = useState(false)
@@ -124,7 +138,7 @@ function App() {
   useEffect(() => {
     fetchSources()
     if (activeTab === 'rules') fetchRules()
-    if (activeTab === 'history') fetchHistory()
+    if (activeTab === 'history') fetchHistory(1)
     if (activeTab === 'schedules') fetchSchedules() // <--- NEW
   }, [activeTab])
 
@@ -188,9 +202,108 @@ function App() {
     catch (err) { console.error(err) }
   }
 
-  const fetchHistory = async () => {
-    try { const res = await axios.get(`${API_URL}/history/`); setHistory(res.data) }
+  const fetchHistory = async (page = historyPage) => {
+    try {
+      const splitIndex = historySort.lastIndexOf('_')
+      const sortBy = splitIndex > 0 ? historySort.slice(0, splitIndex) : 'executed_at'
+      const sortOrder = splitIndex > 0 ? historySort.slice(splitIndex + 1) : 'desc'
+      const res = await axios.get(`${API_URL}/history/`, {
+        params: {
+          page,
+          page_size: historyPageSize,
+          search: historySearch,
+          status: historyStatusFilter,
+          triggered_by: historyTriggeredBy,
+          sort_by: sortBy,
+          sort_order: sortOrder
+        }
+      })
+
+      if (Array.isArray(res.data)) {
+        setHistory(res.data)
+        setHistoryTotal(res.data.length)
+        setHistoryTotalPages(1)
+        setHistoryPage(1)
+      } else {
+        setHistory(res.data.items || [])
+        setHistoryTotal(res.data.total || 0)
+        setHistoryTotalPages(res.data.total_pages || 1)
+        setHistoryPage(res.data.page || page)
+      }
+    }
     catch (err) { console.error(err) }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'history') fetchHistory(1)
+  }, [historySearch, historyStatusFilter, historyTriggeredBy, historySort])
+
+  const filteredSortedRules = useMemo(() => {
+    const search = ruleSearch.trim().toLowerCase()
+    let items = rules.filter(r => {
+      const sourceName = (sources.find(s => s.id === r.source_id)?.name || 'Unknown').toLowerCase()
+      const bySearch = !search || r.name.toLowerCase().includes(search) || sourceName.includes(search)
+      const bySource = ruleSourceFilter === 'all' || String(r.source_id) === ruleSourceFilter
+      return bySearch && bySource
+    })
+
+    items = [...items].sort((a, b) => {
+      const sourceA = (sources.find(s => s.id === a.source_id)?.name || 'Unknown').toLowerCase()
+      const sourceB = (sources.find(s => s.id === b.source_id)?.name || 'Unknown').toLowerCase()
+      if (ruleSort === 'name_desc') return b.name.localeCompare(a.name)
+      if (ruleSort === 'source_asc') return sourceA.localeCompare(sourceB)
+      if (ruleSort === 'source_desc') return sourceB.localeCompare(sourceA)
+      return a.name.localeCompare(b.name)
+    })
+    return items
+  }, [rules, sources, ruleSearch, ruleSourceFilter, ruleSort])
+
+  const filteredSortedSchedules = useMemo(() => {
+    const search = scheduleSearch.trim().toLowerCase()
+    let items = schedules.filter(s => {
+      const bySearch = !search || s.name.toLowerCase().includes(search) || (s.rule_name || '').toLowerCase().includes(search)
+      const byStatus = scheduleStatusFilter === 'all' || (scheduleStatusFilter === 'active' ? s.is_active : !s.is_active)
+      return bySearch && byStatus
+    })
+
+    items = [...items].sort((a, b) => {
+      if (scheduleSort === 'name_desc') return b.name.localeCompare(a.name)
+      if (scheduleSort === 'rule_asc') return (a.rule_name || '').localeCompare(b.rule_name || '')
+      if (scheduleSort === 'rule_desc') return (b.rule_name || '').localeCompare(a.rule_name || '')
+      if (scheduleSort === 'status') return Number(b.is_active) - Number(a.is_active)
+      return a.name.localeCompare(b.name)
+    })
+    return items
+  }, [schedules, scheduleSearch, scheduleStatusFilter, scheduleSort])
+
+  const clearRuleFilters = () => {
+    setRuleSearch("")
+    setRuleSourceFilter("all")
+    setRuleSort("name_asc")
+  }
+
+  const clearHistoryFilters = () => {
+    const isAlreadyDefault =
+      !historySearch.trim() &&
+      historyStatusFilter === 'all' &&
+      !historyTriggeredBy.trim() &&
+      historySort === 'executed_at_desc'
+
+    setHistorySearch("")
+    setHistoryStatusFilter("all")
+    setHistoryTriggeredBy("")
+    setHistorySort("executed_at_desc")
+    setHistoryPage(1)
+
+    if (isAlreadyDefault) {
+      fetchHistory(1)
+    }
+  }
+
+  const clearScheduleFilters = () => {
+    setScheduleSearch("")
+    setScheduleStatusFilter("all")
+    setScheduleSort("name_asc")
   }
 
   const parseConnectionUrl = (url) => {
@@ -556,7 +669,7 @@ function App() {
               </>
             )}
             {activeTab === 'history' && (
-              <button className="btn btn-secondary btn-sm" onClick={fetchHistory}>&#x21BB; Refresh</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => fetchHistory(historyPage)}>&#x21BB; Refresh</button>
             )}
           </div>
         </header>
@@ -744,23 +857,50 @@ function App() {
               <div className="card-header">
                 <div>
                   <div className="card-title">Rule Library</div>
-                  <div className="card-subtitle">{rules.length} rule{rules.length !== 1 ? 's' : ''} saved</div>
+                  <div className="card-subtitle">{filteredSortedRules.length} rule{filteredSortedRules.length !== 1 ? 's' : ''} shown</div>
                 </div>
                 <button className="btn btn-primary btn-sm" onClick={() => { resetPlayground(); setActiveTab('playground'); }}>+ New Rule</button>
               </div>
+              <div className="card-body" style={{ paddingTop: 12, paddingBottom: 12, flex: 'none' }}>
+                <div className="form-grid-3">
+                  <div className="form-group">
+                    <label className="form-label">Search</label>
+                    <input placeholder="Search name or source" value={ruleSearch} onChange={e => setRuleSearch(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Source</label>
+                    <select value={ruleSourceFilter} onChange={e => setRuleSourceFilter(e.target.value)}>
+                      <option value="all">All sources</option>
+                      {sources.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Sort</label>
+                    <select value={ruleSort} onChange={e => setRuleSort(e.target.value)}>
+                      <option value="name_asc">Name (A-Z)</option>
+                      <option value="name_desc">Name (Z-A)</option>
+                      <option value="source_asc">Source (A-Z)</option>
+                      <option value="source_desc">Source (Z-A)</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={clearRuleFilters}>Clear Filters</button>
+                </div>
+              </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
-                {rules.length === 0 ? (
+                {filteredSortedRules.length === 0 ? (
                   <EmptyState
                     icon="≡"
-                    title="No rules yet"
-                    sub="Head to the Playground to write and save your first validation rule."
+                    title="No rules match"
+                    sub={rules.length === 0 ? "Head to the Playground to write and save your first validation rule." : "Try changing the search/filter options."}
                     action={<button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={() => setActiveTab('playground')}>Open Playground</button>}
                   />
                 ) : (
                   <table className="rule-table">
                     <thead><tr><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
                     <tbody>
-                      {rules.map(r => (
+                      {filteredSortedRules.map(r => (
                         <tr key={r.id}>
                           {/* <td className="text-muted text-xs font-mono">{r.id}</td> */}
                           <td className="strong">{r.name}</td>
@@ -957,9 +1097,55 @@ function App() {
               <div className="card-header">
                 <div>
                   <div className="card-title">Execution Logs</div>
-                  <div className="card-subtitle">{history.length} run{history.length !== 1 ? 's' : ''} recorded</div>
+                  <div className="card-subtitle">{historyTotal} run{historyTotal !== 1 ? 's' : ''} recorded</div>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={fetchHistory}>&#x21BB; Refresh</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => fetchHistory(historyPage)}>&#x21BB; Refresh</button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={historyPage <= 1}
+                    onClick={() => fetchHistory(historyPage - 1)}
+                  >&#x2039; Prev</button>
+                  <span className="text-xs text-muted">Page {historyPage} / {historyTotalPages}</span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={historyPage >= historyTotalPages}
+                    onClick={() => fetchHistory(historyPage + 1)}
+                  >Next &#x203A;</button>
+                </div>
+              </div>
+              <div className="card-body" style={{ paddingTop: 12, paddingBottom: 12, flex: 'none' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+                  <div className="form-group">
+                    <label className="form-label">Search</label>
+                    <input placeholder="Rule, status, triggered by" value={historySearch} onChange={e => setHistorySearch(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Status</label>
+                    <select value={historyStatusFilter} onChange={e => setHistoryStatusFilter(e.target.value)}>
+                      <option value="all">All statuses</option>
+                      <option value="PASS">PASS</option>
+                      <option value="FAIL">FAIL</option>
+                      <option value="ERROR">ERROR</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Sort</label>
+                    <select value={historySort} onChange={e => setHistorySort(e.target.value)}>
+                      <option value="executed_at_desc">Newest first</option>
+                      <option value="executed_at_asc">Oldest first</option>
+                      <option value="rule_asc">Rule (A-Z)</option>
+                      <option value="rule_desc">Rule (Z-A)</option>
+                      <option value="status_asc">Status (A-Z)</option>
+                      <option value="status_desc">Status (Z-A)</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Triggered By</label>
+                    <input placeholder="e.g. Manual or schedule name" value={historyTriggeredBy} onChange={e => setHistoryTriggeredBy(e.target.value)} />
+                  </div>
+                  <button className="btn btn-ghost btn-sm" onClick={clearHistoryFilters}>Clear Filters</button>
+                </div>
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
                 {history.length === 0 ? (
@@ -1004,22 +1190,51 @@ function App() {
               <div className="card-header">
                 <div>
                   <div className="card-title">Active Triggers</div>
-                  <div className="card-subtitle">Rules configured to run automatically</div>
+                  <div className="card-subtitle">{filteredSortedSchedules.length} trigger{filteredSortedSchedules.length !== 1 ? 's' : ''} shown</div>
+                </div>
+              </div>
+              <div className="card-body" style={{ paddingTop: 12, paddingBottom: 12, flex: 'none' }}>
+                <div className="form-grid-3">
+                  <div className="form-group">
+                    <label className="form-label">Search</label>
+                    <input placeholder="Schedule or rule name" value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Status</label>
+                    <select value={scheduleStatusFilter} onChange={e => setScheduleStatusFilter(e.target.value)}>
+                      <option value="all">All</option>
+                      <option value="active">Active</option>
+                      <option value="paused">Paused</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Sort</label>
+                    <select value={scheduleSort} onChange={e => setScheduleSort(e.target.value)}>
+                      <option value="name_asc">Schedule (A-Z)</option>
+                      <option value="name_desc">Schedule (Z-A)</option>
+                      <option value="rule_asc">Rule (A-Z)</option>
+                      <option value="rule_desc">Rule (Z-A)</option>
+                      <option value="status">Status (Active first)</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={clearScheduleFilters}>Clear Filters</button>
                 </div>
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
-                {schedules.length === 0 ? (
+                {filteredSortedSchedules.length === 0 ? (
                   <EmptyState
                     icon="⏱"
-                    title="No schedules yet"
-                    sub="Go to the Rule Library and click 'Schedule' on any rule to automate its execution."
+                    title="No schedules match"
+                    sub="Try adjusting filters, or create a schedule from Rule Library."
                     action={<button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={() => setActiveTab('rules')}>Go to Rule Library</button>}
                   />
                 ) : (
                   <table className="rule-table">
                     <thead><tr><th>Schedule Name</th><th>Target Rule</th><th>Frequency</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                     <tbody>
-                      {schedules.map(s => (
+                      {filteredSortedSchedules.map(s => (
                         <tr key={s.id}>
                           <td className="strong">{s.name}</td>
                           <td>{s.rule_name}</td>
