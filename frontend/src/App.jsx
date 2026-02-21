@@ -35,7 +35,7 @@ const ResultsTable = ({ data }) => {
           {data.map((row, i) => (
             <tr key={i}>
               {headers.map(h => (
-                <td key={h} className="mono" style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <td key={h} className="mono" style={{ minWidth: 120, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {typeof row[h] === 'object' ? JSON.stringify(row[h]) : String(row[h] ?? '')}
                 </td>
               ))}
@@ -374,6 +374,16 @@ function App() {
     } catch (err) { alert("Execution Failed: " + err.response?.data?.detail) }
   }
 
+  const deleteRule = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this rule?")) return
+    try {
+      await axios.delete(`${API_URL}/rules/${id}`)
+      setRules(rules.filter(r => r.id !== id))
+    } catch (err) {
+      alert("Error deleting rule: " + (err.response?.data?.detail || err.message))
+    }
+  }
+
 
   return (
     <div className={`container${darkMode ? ' dark' : ''}`}>
@@ -437,11 +447,11 @@ function App() {
         <nav className="sidebar-nav">
           <span className="nav-section-label">Workspace</span>
           {[
-            { id: 'datahub',    icon: '⊞', label: 'Data Hub'    },
-            { id: 'playground', icon: '⚡', label: 'Playground'  },
-            { id: 'rules',      icon: '≡', label: 'Rule Library' },
-            { id: 'schedules',  icon: '⏱', label: 'Automations' },
-            { id: 'history',    icon: '≈', label: 'Run History' },
+            { id: 'datahub', icon: '⊞', label: 'Data Hub' },
+            { id: 'playground', icon: '⚡', label: 'Playground' },
+            { id: 'rules', icon: '≡', label: 'Rule Library' },
+            { id: 'schedules', icon: '⏱', label: 'Automations' },
+            { id: 'history', icon: '≈', label: 'Run History' },
           ].map(item => (
             <button
               key={item.id}
@@ -480,27 +490,11 @@ function App() {
             </div>
           </div>
           <div className="topbar-right">
-            {/* {activeTab === 'playground' && (
+            {activeTab === 'playground' && (
               <>
-                {editingId && <button className="btn btn-secondary btn-sm" onClick={resetPlayground}>&#x2715; Cancel Edit</button>}
-                <button className="btn btn-secondary btn-sm" onClick={saveOrUpdateRule}>
-                  &#x1F4BE; {editingId ? 'Update Rule' : 'Save Rule'}
-                </button>
-                <button className="btn btn-primary btn-sm" onClick={runAdHoc} disabled={pgIsRunning}>
-                  {pgIsRunning ? '... Running...' : '\u25b6 Run Query'}
-                </button>
+                {/* {editingId && <button className="btn btn-secondary btn-sm" onClick={resetPlayground}>&#x2715; Cancel Edit</button>} */}
               </>
-            )} */}
-            {/* {activeTab === 'datahub' && dataHubView === 'list' && (
-              <button className="btn btn-primary btn-sm" onClick={() => { setDataHubView('create'); setEditingSourceId(null); resetForm(); }}>
-                + New Connection
-              </button>
-            )} */}
-            {/* {activeTab === 'rules' && (
-              <button className="btn btn-primary btn-sm" onClick={() => { resetPlayground(); setActiveTab('playground'); }}>
-                + New Rule
-              </button>
-            )} */}
+            )}
             {activeTab === 'history' && (
               <button className="btn btn-secondary btn-sm" onClick={fetchHistory}>&#x21BB; Refresh</button>
             )}
@@ -605,6 +599,7 @@ function App() {
                       />
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', paddingTop: 20, flexShrink: 0 }}>
+                      {editingId && <button className="btn btn-secondary btn-sm" onClick={resetPlayground}>&#x2715; Cancel Edit</button>}
                       <button className="btn btn-secondary" onClick={saveOrUpdateRule}>
                         &#x1F4BE; {editingId ? 'Update Rule' : 'Save Rule'}
                       </button>
@@ -688,7 +683,8 @@ function App() {
                 ) : (
                   <table className="rule-table">
                     <thead><tr><th>#</th><th>Name</th><th>Data Source</th><th>Actions</th><th>Schedule</th></tr></thead>
-                    <tbody>
+                    <tbody>  <button className="btn btn-danger btn-sm" onClick={() => deleteRule(r.id)}>Delete</button>
+                            
                       {rules.map(r => (
                         <tr key={r.id}>
                           <td className="text-muted text-xs font-mono">{r.id}</td>
